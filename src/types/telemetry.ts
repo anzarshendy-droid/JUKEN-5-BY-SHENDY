@@ -219,12 +219,16 @@ export interface DragRunRecord {
   createdAt: number;
   source: 'gps' | 'simulator';
   targetDistance: DragTargetDistance;
+  isJumpStart?: boolean;
   reactionTimeMs: number | null;
+  time30ftMs?: number | null;
   time60ftMs: number | null;
+  time330ftMs?: number | null;
   time0to60Ms: number | null;
   time0to100Ms: number | null;
   time201mMs: number | null;
   trap201Kmh: number | null;
+  time1000ftMs?: number | null;
   time402mMs: number | null;
   trap402Kmh: number | null;
   peakSpeedKmh: number;

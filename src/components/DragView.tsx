@@ -8,7 +8,10 @@ import {
 import {
   clearAllDragRuns,
   deleteDragRun,
+  DIST_1000FT_M,
   DIST_201M,
+  DIST_30FT_M,
+  DIST_330FT_M,
   DIST_402M,
   DIST_60FT_M,
   exportDragRunsToCsv,
@@ -35,7 +38,7 @@ interface DragViewProps {
   connectionMode: ConnectionMode;
 }
 
-type DragPhase = 'idle' | 'staging' | 'countdown' | 'armed' | 'running' | 'finished';
+type DragPhase = 'idle' | 'countdown' | 'armed' | 'running' | 'finished';
 type DragSource = 'gps' | 'simulator';
 
 interface LiveSplits {
@@ -43,12 +46,16 @@ interface LiveSplits {
   distanceM: number;
   speedKmh: number;
   accuracyM: number | null;
+  isJumpStart: boolean;
   reactionTimeMs: number | null;
+  time30ftMs: number | null;
   time60ftMs: number | null;
+  time330ftMs: number | null;
   time0to60Ms: number | null;
   time0to100Ms: number | null;
   time201mMs: number | null;
   trap201Kmh: number | null;
+  time1000ftMs: number | null;
   time402mMs: number | null;
   trap402Kmh: number | null;
   peakSpeedKmh: number;
@@ -60,12 +67,16 @@ const INITIAL_SPLITS: LiveSplits = {
   distanceM: 0,
   speedKmh: 0,
   accuracyM: null,
+  isJumpStart: false,
   reactionTimeMs: null,
+  time30ftMs: null,
   time60ftMs: null,
+  time330ftMs: null,
   time0to60Ms: null,
   time0to100Ms: null,
   time201mMs: null,
   trap201Kmh: null,
+  time1000ftMs: null,
   time402mMs: null,
   trap402Kmh: null,
   peakSpeedKmh: 0,
@@ -75,19 +86,20 @@ const INITIAL_SPLITS: LiveSplits = {
 export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => {
   const [targetDistance, setTargetDistance] = useState<DragTargetDistance>(201);
   const [sourceMode, setSourceMode] = useState<DragSource>('gps');
-  const [launchMode, setLaunchMode] = useState<'auto_move' | 'tree'>('auto_move');
+  const [launchMode, setLaunchMode] = useState<'auto_move' | 'tree'>('tree');
   const [phase, setPhase] = useState<DragPhase>('idle');
-  const [countdownStep, setCountdownStep] = useState<number>(3);
+  const [litRedLights, setLitRedLights] = useState<number>(0); // 0..5
+  const [treeStatusLight, setTreeStatusLight] = useState<'off' | 'red' | 'green' | 'foul'>('off');
   const [splits, setSplits] = useState<LiveSplits>(INITIAL_SPLITS);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [gpsStatus, setGpsStatus] = useState<string>('Siap kunci sinyal GPS');
   const [runs, setRuns] = useState<DragRunRecord[]>(() => loadDragRuns());
 
-  // Mutable refs for accurate 20Hz / GPS watch updates without stale closures
   const phaseRef = useRef<DragPhase>('idle');
   const splitsRef = useRef<LiveSplits>(INITIAL_SPLITS);
   const startTimeRef = useRef<number>(0);
   const greenLightTimeRef = useRef<number>(0);
+  const jumpStartRef = useRef<boolean>(false);
   const prevSampleRef = useRef<{
     timeMs: number;
     distanceM: number;
@@ -100,6 +112,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
   const simTimerRef = useRef<number | null>(null);
   const rafTimerRef = useRef<number | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
+  const greenDelayTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     latestRpmRef.current = frame.rpm;
@@ -122,6 +135,10 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
       clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
+    if (greenDelayTimerRef.current !== null) {
+      clearTimeout(greenDelayTimerRef.current);
+      greenDelayTimerRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -140,12 +157,16 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         createdAt: Date.now(),
         source: src,
         targetDistance: target,
+        isJumpStart: finalSplits.isJumpStart,
         reactionTimeMs: finalSplits.reactionTimeMs,
+        time30ftMs: finalSplits.time30ftMs,
         time60ftMs: finalSplits.time60ftMs,
+        time330ftMs: finalSplits.time330ftMs,
         time0to60Ms: finalSplits.time0to60Ms,
         time0to100Ms: finalSplits.time0to100Ms,
         time201mMs: finalSplits.time201mMs,
         trap201Kmh: finalSplits.trap201Kmh,
+        time1000ftMs: finalSplits.time1000ftMs,
         time402mMs: finalSplits.time402mMs,
         trap402Kmh: finalSplits.trap402Kmh,
         peakSpeedKmh: Number(finalSplits.peakSpeedKmh.toFixed(1)),
@@ -169,7 +190,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
       target: DragTargetDistance
     ) => {
       if (phaseRef.current === 'armed') {
-        // Trigger start once vehicle accelerates >= 2.8 km/h or moves >= 1.2m
         if (nextSpeedKmh >= 2.8 || nextDistM >= 1.2) {
           phaseRef.current = 'running';
           setPhase('running');
@@ -181,6 +201,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           splitsRef.current = {
             ...INITIAL_SPLITS,
             accuracyM,
+            isJumpStart: jumpStartRef.current,
             reactionTimeMs: rt,
             speedKmh: nextSpeedKmh,
             distanceM: 0,
@@ -246,6 +267,20 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.time0to100Ms = hit.timeMs;
       }
 
+      // 30 ft (9.144 m)
+      if (cur.time30ftMs === null && nextDistM >= DIST_30FT_M) {
+        const hit = interpolateCrossing(
+          prev.distanceM,
+          nextDistM,
+          DIST_30FT_M,
+          prev.timeMs,
+          elapsedMs,
+          prev.speedKmh,
+          nextSpeedKmh
+        );
+        cur.time30ftMs = hit.timeMs;
+      }
+
       // 60 ft (18.288 m)
       if (cur.time60ftMs === null && nextDistM >= DIST_60FT_M) {
         const hit = interpolateCrossing(
@@ -260,7 +295,21 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.time60ftMs = hit.timeMs;
       }
 
-      // 201 m (1/8 mile)
+      // 330 ft (100.584 m)
+      if (cur.time330ftMs === null && nextDistM >= DIST_330FT_M) {
+        const hit = interpolateCrossing(
+          prev.distanceM,
+          nextDistM,
+          DIST_330FT_M,
+          prev.timeMs,
+          elapsedMs,
+          prev.speedKmh,
+          nextSpeedKmh
+        );
+        cur.time330ftMs = hit.timeMs;
+      }
+
+      // 201 m (660 ft / 1/8 mile)
       if (cur.time201mMs === null && nextDistM >= DIST_201M) {
         const hit = interpolateCrossing(
           prev.distanceM,
@@ -275,7 +324,21 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.trap201Kmh = hit.speedKmh;
       }
 
-      // 402 m (1/4 mile)
+      // 1000 ft (304.8 m)
+      if (cur.time1000ftMs === null && nextDistM >= DIST_1000FT_M) {
+        const hit = interpolateCrossing(
+          prev.distanceM,
+          nextDistM,
+          DIST_1000FT_M,
+          prev.timeMs,
+          elapsedMs,
+          prev.speedKmh,
+          nextSpeedKmh
+        );
+        cur.time1000ftMs = hit.timeMs;
+      }
+
+      // 402 m (1320 ft / 1/4 mile)
       if (cur.time402mMs === null && nextDistM >= DIST_402M) {
         const hit = interpolateCrossing(
           prev.distanceM,
@@ -311,8 +374,11 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
     (src: DragSource, target: DragTargetDistance, withReactionLight: boolean) => {
       stopAllTimers();
       setGpsError(null);
-      splitsRef.current = INITIAL_SPLITS;
-      setSplits(INITIAL_SPLITS);
+      splitsRef.current = {
+        ...INITIAL_SPLITS,
+        isJumpStart: jumpStartRef.current,
+      };
+      setSplits(splitsRef.current);
       prevSampleRef.current = null;
       greenLightTimeRef.current = withReactionLight ? Date.now() : 0;
 
@@ -326,12 +392,11 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
 
         phaseRef.current = 'armed';
         setPhase('armed');
-        setGpsStatus('GPS Aktif · Silakan gas / jalan dari posisi diam (0 m)');
+        setGpsStatus('HIJAU (GO!) · Silakan gas dari posisi diam (0 m)');
 
         let cumulativeDist = 0;
         let lastCoord: { lat: number; lon: number; time: number } | null = null;
 
-        // 50ms smooth visual stopwatch while running
         rafTimerRef.current = window.setInterval(() => {
           if (phaseRef.current === 'running') {
             setSplits((s) => ({
@@ -346,15 +411,13 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
             const { latitude, longitude, speed, accuracy } = pos.coords;
             const now = pos.timestamp || Date.now();
             const acc = Number.isFinite(accuracy) ? Math.round(accuracy) : null;
-
             let speedKmh = speed !== null && Number.isFinite(speed) ? speed * 3.6 : 0;
 
             if (lastCoord) {
               const dtSec = Math.max(0.05, (now - lastCoord.time) / 1000);
               const stepM = haversineMeters(lastCoord.lat, lastCoord.lon, latitude, longitude);
-
-              // Filter GPS stationary jitter (< 0.8m when accuracy is wide)
               const jitterFloor = acc && acc > 15 ? 1.5 : 0.7;
+
               if (phaseRef.current === 'running') {
                 if (stepM >= jitterFloor) {
                   cumulativeDist += stepM;
@@ -363,7 +426,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
                   speedKmh = (stepM / dtSec) * 3.6;
                 }
               } else if (phaseRef.current === 'armed') {
-                // Only arm-trigger on genuine movement (> 2.5m from stage point or GPS speed >= 3 km/h)
                 const launchDelta = haversineMeters(
                   lastCoord.lat,
                   lastCoord.lon,
@@ -380,9 +442,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
             } else {
               lastCoord = { lat: latitude, lon: longitude, time: now };
               setSplits((s) => ({ ...s, accuracyM: acc }));
-              setGpsStatus(
-                `GPS Terkunci (±${acc ?? '-'} m) · Siap Launch!`
-              );
+              setGpsStatus(`GPS Terkunci (±${acc ?? '-'} m) · HIJAU GO!`);
               return;
             }
 
@@ -408,35 +468,34 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           }
         );
       } else {
-        // Realistic Drag Motorcycle Physics Simulator (20Hz) for indoor testing / demo
+        // Realistic 20Hz Drag Motorcycle Physics Simulator
         phaseRef.current = 'running';
         setPhase('running');
         startTimeRef.current = Date.now();
-        const reactionMs = withReactionLight ? Math.round(140 + Math.random() * 180) : null;
+        const reactionMs = withReactionLight ? Math.round(130 + Math.random() * 170) : null;
         splitsRef.current = {
           ...INITIAL_SPLITS,
           accuracyM: 2.5,
+          isJumpStart: false,
           reactionTimeMs: reactionMs,
         };
         setGpsStatus('Simulasi Drag GPS 20 Hz berjalan...');
 
         let simDistM = 0;
         let simSpeedMs = 0;
-        const dt = 0.05; // 50ms tick
-        const peakAccel = 7.4 + (Math.random() - 0.5) * 0.4; // ~0.75G launch
+        const dt = 0.05;
+        const peakAccel = 7.5 + (Math.random() - 0.5) * 0.4;
 
         simTimerRef.current = window.setInterval(() => {
           const now = Date.now();
           const elapsedSec = (now - startTimeRef.current) / 1000;
-          // Progressive motorcycle drag acceleration curve (torque tapers cleanly at high speed)
           const dragDecay = Math.max(1.8, peakAccel - simSpeedMs * 0.13);
-          simSpeedMs = Math.min(43.5, simSpeedMs + dragDecay * dt); // up to ~156 km/h
+          simSpeedMs = Math.min(44.5, simSpeedMs + dragDecay * dt);
           simDistM += simSpeedMs * dt;
           const speedKmh = simSpeedMs * 3.6;
-          // Synthetic realistic RPM correlated if ECU disconnected
+
           if (connectionMode === 'disconnected') {
-            const syntheticRpm = Math.min(12600, 4800 + ((simSpeedMs * 240) % 7600));
-            latestRpmRef.current = syntheticRpm;
+            latestRpmRef.current = Math.min(12600, 4800 + ((simSpeedMs * 240) % 7600));
           }
 
           processMotionSample(simDistM, speedKmh, 2.5, now, 'simulator', target);
@@ -451,26 +510,64 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
 
   const handleStartDrag = () => {
     setGpsError(null);
+    jumpStartRef.current = false;
+
     if (launchMode === 'tree') {
       stopAllTimers();
       phaseRef.current = 'countdown';
       setPhase('countdown');
-      setCountdownStep(3);
-      let step = 3;
+      setLitRedLights(1);
+      setTreeStatusLight('red');
+      setSplits(INITIAL_SPLITS);
+
+      // Watch GPS during countdown in GPS mode to catch jump-starts (FOUL RED LIGHT)
+      if (sourceMode === 'gps' && typeof navigator !== 'undefined' && navigator.geolocation) {
+        let stageCoord: { lat: number; lon: number } | null = null;
+        watchIdRef.current = navigator.geolocation.watchPosition(
+          (pos) => {
+            if (phaseRef.current !== 'countdown') return;
+            const { latitude, longitude, speed } = pos.coords;
+            if (!stageCoord) {
+              stageCoord = { lat: latitude, lon: longitude };
+              return;
+            }
+            const moved = haversineMeters(stageCoord.lat, stageCoord.lon, latitude, longitude);
+            const kmh = speed && Number.isFinite(speed) ? speed * 3.6 : 0;
+            if (kmh >= 3.2 || moved >= 3.0) {
+              jumpStartRef.current = true;
+              setTreeStatusLight('foul');
+            }
+          },
+          () => {
+            // ignore pre-stage GPS errors here; main tracker reports if needed
+          },
+          { enableHighAccuracy: true, maximumAge: 0 }
+        );
+      }
+
+      let count = 1;
       countdownTimerRef.current = window.setInterval(() => {
-        step -= 1;
-        if (step > 0) {
-          setCountdownStep(step);
-        } else {
+        count += 1;
+        if (count <= 5) {
+          setLitRedLights(count);
+        }
+        if (count >= 5) {
           if (countdownTimerRef.current !== null) {
             clearInterval(countdownTimerRef.current);
             countdownTimerRef.current = null;
           }
-          setCountdownStep(0);
-          beginTrackingSession(sourceMode, targetDistance, true);
+          // Short realistic hold after all 5 red lights are lit, then switch to GREEN (GO!)
+          const holdDelay = 650 + Math.round(Math.random() * 250);
+          greenDelayTimerRef.current = window.setTimeout(() => {
+            setLitRedLights(0);
+            setTreeStatusLight(jumpStartRef.current ? 'foul' : 'green');
+            beginTrackingSession(sourceMode, targetDistance, true);
+          }, holdDelay);
         }
-      }, 850);
+      }, 700);
     } else {
+      setLitRedLights(0);
+      setTreeStatusLight('green');
       beginTrackingSession(sourceMode, targetDistance, false);
     }
   };
@@ -478,7 +575,10 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
   const handleStopOrReset = () => {
     stopAllTimers();
     phaseRef.current = 'idle';
+    jumpStartRef.current = false;
     setPhase('idle');
+    setLitRedLights(0);
+    setTreeStatusLight('off');
     setSplits(INITIAL_SPLITS);
     setGpsError(null);
     setGpsStatus('Siap kunci sinyal GPS');
@@ -499,7 +599,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
   };
 
   const best201 = useMemo(() => {
-    const valid = runs.filter((r) => r.time201mMs !== null);
+    const valid = runs.filter((r) => r.time201mMs !== null && !r.isJumpStart);
     if (valid.length === 0) return null;
     return valid.reduce((best, r) =>
       (r.time201mMs ?? Infinity) < (best.time201mMs ?? Infinity) ? r : best
@@ -507,7 +607,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
   }, [runs]);
 
   const best402 = useMemo(() => {
-    const valid = runs.filter((r) => r.time402mMs !== null);
+    const valid = runs.filter((r) => r.time402mMs !== null && !r.isJumpStart);
     if (valid.length === 0) return null;
     return valid.reduce((best, r) =>
       (r.time402mMs ?? Infinity) < (best.time402mMs ?? Infinity) ? r : best
@@ -527,12 +627,11 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
               <span>Mode Drag Timer GPS (201 m &amp; 402 m)</span>
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-              Catat waktu tempuh 60ft, 0–60 km/h, 0–100 km/h, 201 meter, dan 402 meter lengkap dengan kecepatan akhir (Trap Speed) dan Peak RPM.
+              Lampu start 5 titik Merah &amp; Hijau dengan data jarak bertahap 30 ft, 60 ft, 330 ft, 201 m, 1000 ft, hingga 402 m.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Target Distance Switcher */}
             <div className="inline-flex rounded-xl bg-slate-100 dark:bg-[#0B0E14] p-1 border border-slate-200 dark:border-slate-800">
               <button
                 type="button"
@@ -560,7 +659,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
               </button>
             </div>
 
-            {/* Source Mode Switcher */}
             <div className="inline-flex rounded-xl bg-slate-100 dark:bg-[#0B0E14] p-1 border border-slate-200 dark:border-slate-800">
               <button
                 type="button"
@@ -592,10 +690,22 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           </div>
         </div>
 
-        {/* Launch Mode + Primary Start/Stop Action */}
+        {/* Launch Mode + Start/Stop */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-slate-500 dark:text-slate-400 font-medium">Pemicu Start:</span>
+            <button
+              type="button"
+              disabled={phase !== 'idle' && phase !== 'finished'}
+              onClick={() => setLaunchMode('tree')}
+              className={`min-h-[36px] px-3 rounded-lg border text-xs font-medium transition-colors disabled:opacity-60 ${
+                launchMode === 'tree'
+                  ? 'border-[#FF6B1A]/60 bg-[#FF6B1A]/10 text-[#E05206] dark:text-[#FF8533]'
+                  : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B0E14] text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              Lampu Start (5 Lampu Merah → Hijau)
+            </button>
             <button
               type="button"
               disabled={phase !== 'idle' && phase !== 'finished'}
@@ -607,18 +717,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
               }`}
             >
               Otomatis Saat Bergerak
-            </button>
-            <button
-              type="button"
-              disabled={phase !== 'idle' && phase !== 'finished'}
-              onClick={() => setLaunchMode('tree')}
-              className={`min-h-[36px] px-3 rounded-lg border text-xs font-medium transition-colors disabled:opacity-60 ${
-                launchMode === 'tree'
-                  ? 'border-[#FF6B1A]/60 bg-[#FF6B1A]/10 text-[#E05206] dark:text-[#FF8533]'
-                  : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0B0E14] text-slate-600 dark:text-slate-400'
-              }`}
-            >
-              Lampu Start (3-2-1-GO)
             </button>
           </div>
 
@@ -663,27 +761,62 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         )}
       </div>
 
-      {/* Christmas Tree Countdown Overlay Banner */}
-      {phase === 'countdown' && (
-        <div className="rounded-2xl border border-[#FF6B1A]/50 bg-white dark:bg-[#121721] p-6 flex flex-col items-center justify-center gap-4">
+      {/* 5-Light Drag Christmas Tree + Red/Green Status Gantry */}
+      {(launchMode === 'tree' || phase === 'countdown' || treeStatusLight !== 'off') && (
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 sm:p-5 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {[1, 2, 3, 4, 5].map((idx) => {
+              const isLit = phase === 'countdown' && idx <= litRedLights;
+              return (
+                <div key={idx} className="flex flex-col items-center gap-1">
+                  <div
+                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 flex items-center justify-center font-mono text-xs font-bold transition-all duration-150 ${
+                      isLit
+                        ? 'bg-red-500 border-red-300 text-white shadow-[0_0_20px_rgba(239,68,68,0.75)] scale-105'
+                        : 'bg-slate-100 dark:bg-[#0B0E14] border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-600'
+                    }`}
+                  >
+                    {idx}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Merah (Tahan/Foul) & Hijau (GO) Dual Signal */}
           <div className="flex items-center gap-4">
-            {[3, 2, 1].map((num) => (
+            <div className="flex items-center gap-2">
               <div
-                key={num}
-                className={`w-12 h-12 rounded-full border-2 flex items-center justify-center font-display font-bold text-lg transition-all ${
-                  countdownStep === num
-                    ? 'bg-amber-400 border-amber-300 text-slate-950 scale-110 shadow-lg shadow-amber-500/30'
-                    : countdownStep < num
-                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-500'
-                    : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-400'
+                className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full border-2 flex items-center justify-center text-[10px] font-bold transition-all ${
+                  treeStatusLight === 'red' || treeStatusLight === 'foul'
+                    ? 'bg-red-600 border-red-300 text-white shadow-[0_0_20px_rgba(220,38,38,0.8)]'
+                    : 'bg-slate-100 dark:bg-[#0B0E14] border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-600'
                 }`}
               >
-                {num}
+                {treeStatusLight === 'foul' ? 'FOUL' : 'RED'}
               </div>
-            ))}
-          </div>
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-            Bersiap di Garis Start (Stage)...
+              <div
+                className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full border-2 flex items-center justify-center text-[10px] font-bold transition-all ${
+                  treeStatusLight === 'green'
+                    ? 'bg-emerald-500 border-emerald-200 text-slate-950 shadow-[0_0_24px_rgba(16,185,129,0.85)] scale-105'
+                    : 'bg-slate-100 dark:bg-[#0B0E14] border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-600'
+                }`}
+              >
+                GO!
+              </div>
+            </div>
+
+            <div className="text-xs font-semibold text-right min-w-[120px]">
+              {treeStatusLight === 'red' ? (
+                <span className="text-red-500">TAHAN / STAGE ({litRedLights}/5)</span>
+              ) : treeStatusLight === 'foul' ? (
+                <span className="text-red-500">MERAH FOUL (CURI START)</span>
+              ) : treeStatusLight === 'green' ? (
+                <span className="text-emerald-500">LAMPU HIJAU — GAS!</span>
+              ) : (
+                <span className="text-slate-500 dark:text-slate-400">Lampu Siap</span>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -691,19 +824,21 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
       {/* Primary Live Chronometer & Distance Cockpit */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-5 space-y-4">
-          <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-            <span className="font-medium">
-              {phase === 'armed'
-                ? 'SIAP START (GO!) · Menunggu Gerakan'
+          <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 gap-2">
+            <span className="font-medium truncate">
+              {phase === 'countdown'
+                ? `HITUNG MUNDUR LAMPU MERAH (${litRedLights}/5)`
+                : phase === 'armed'
+                ? 'HIJAU (GO!) · Menunggu Gerakan'
                 : phase === 'running'
                 ? `SEDANG BERLARI · Target ${targetDistance} m`
                 : phase === 'finished'
-                ? `FINISH ${targetDistance} m`
+                ? `FINISH ${targetDistance} m${splits.isJumpStart ? ' (FOUL)' : ''}`
                 : gpsStatus}
             </span>
-            <span className="font-mono tabular-nums">
+            <span className="font-mono tabular-nums shrink-0">
               {sourceMode === 'gps'
-                ? `GPS ${splits.accuracyM !== null ? `±${splits.accuracyM} m` : 'Menunggu'}`
+                ? `GPS ${splits.accuracyM !== null ? `±${splits.accuracyM} m` : 'Siap'}`
                 : 'Simulasi 20 Hz'}
               {' · '}
               {connectionMode !== 'disconnected'
@@ -746,7 +881,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
             </div>
           </div>
 
-          {/* Track Progress Bar with 201m & 402m Marker */}
+          {/* Track Progress Bar with Sequential Markers */}
           <div className="space-y-1.5 pt-1">
             <div className="relative h-3.5 w-full rounded-full bg-slate-100 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 overflow-hidden">
               <div
@@ -762,18 +897,28 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
               )}
             </div>
             <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              <span>0 m (Start)</span>
-              {targetDistance === 402 && <span className="text-emerald-600 dark:text-emerald-400">201 m</span>}
-              <span>{targetDistance} m (Finish)</span>
+              <span>0 m</span>
+              <span>30 ft</span>
+              <span>60 ft</span>
+              <span>330 ft</span>
+              {targetDistance === 402 ? (
+                <>
+                  <span className="text-emerald-600 dark:text-emerald-400">201 m</span>
+                  <span>1000 ft</span>
+                  <span>402 m</span>
+                </>
+              ) : (
+                <span className="text-[#FF6B1A] font-semibold">201 m</span>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Live Split Timeslip Card */}
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 sm:p-5 space-y-3">
+        {/* Live Split Timeslip Card (30ft, 60ft, 330ft, 201m, 1000ft, 402m) */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 sm:p-5 space-y-2.5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Catatan Waktu Split (Timeslip)
+              Data Jarak &amp; Waktu (Timeslip)
             </h3>
             <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
               Peak {Math.round(splits.peakRpm).toLocaleString('id-ID')} RPM
@@ -781,42 +926,59 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           </div>
 
           <div className="divide-y divide-slate-200 dark:divide-slate-800 text-xs font-mono">
-            <div className="py-2 flex items-center justify-between">
+            <div className="py-1.5 flex items-center justify-between">
               <span className="text-slate-500 dark:text-slate-400">Reaction Time (RT)</span>
-              <span className="font-semibold text-slate-900 dark:text-slate-100">
+              <span
+                className={`font-semibold ${
+                  splits.isJumpStart ? 'text-red-500' : 'text-slate-900 dark:text-slate-100'
+                }`}
+              >
+                {splits.isJumpStart ? 'FOUL · ' : ''}
                 {formatDragSeconds(splits.reactionTimeMs)}
               </span>
             </div>
-            <div className="py-2 flex items-center justify-between">
+            <div className="py-1.5 flex items-center justify-between">
+              <span className="text-slate-500 dark:text-slate-400">30 ft (9.1 m)</span>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {formatDragSeconds(splits.time30ftMs)}
+              </span>
+            </div>
+            <div className="py-1.5 flex items-center justify-between">
               <span className="text-slate-500 dark:text-slate-400">60 ft (18.3 m)</span>
               <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {formatDragSeconds(splits.time60ftMs)}
               </span>
             </div>
-            <div className="py-2 flex items-center justify-between">
-              <span className="text-slate-500 dark:text-slate-400">0 – 60 km/h</span>
+            <div className="py-1.5 flex items-center justify-between">
+              <span className="text-slate-500 dark:text-slate-400">330 ft (100.6 m)</span>
               <span className="font-semibold text-slate-900 dark:text-slate-100">
-                {formatDragSeconds(splits.time0to60Ms)}
+                {formatDragSeconds(splits.time330ftMs)}
               </span>
             </div>
-            <div className="py-2 flex items-center justify-between">
-              <span className="text-slate-500 dark:text-slate-400">0 – 100 km/h</span>
-              <span className="font-semibold text-slate-900 dark:text-slate-100">
-                {formatDragSeconds(splits.time0to100Ms)}
-              </span>
-            </div>
-            <div className="py-2 flex items-center justify-between">
-              <span className="text-[#FF6B1A] font-semibold">201 m (1/8 Mile)</span>
+            <div className="py-1.5 flex items-center justify-between">
+              <span className="text-[#FF6B1A] font-semibold">201 m (660 ft)</span>
               <span className="font-bold text-[#FF6B1A]">
                 {formatDragSeconds(splits.time201mMs)}
                 {splits.trap201Kmh !== null ? ` · ${splits.trap201Kmh.toFixed(1)} km/h` : ''}
               </span>
             </div>
-            <div className="py-2 flex items-center justify-between">
-              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">402 m (1/4 Mile)</span>
+            <div className="py-1.5 flex items-center justify-between">
+              <span className="text-slate-500 dark:text-slate-400">1000 ft (304.8 m)</span>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {formatDragSeconds(splits.time1000ftMs)}
+              </span>
+            </div>
+            <div className="py-1.5 flex items-center justify-between">
+              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">402 m (1320 ft)</span>
               <span className="font-bold text-emerald-600 dark:text-emerald-400">
                 {formatDragSeconds(splits.time402mMs)}
                 {splits.trap402Kmh !== null ? ` · ${splits.trap402Kmh.toFixed(1)} km/h` : ''}
+              </span>
+            </div>
+            <div className="py-1.5 flex items-center justify-between">
+              <span className="text-slate-500 dark:text-slate-400">0–60 / 0–100 km/h</span>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {formatDragSeconds(splits.time0to60Ms)} / {formatDragSeconds(splits.time0to100Ms)}
               </span>
             </div>
           </div>
@@ -836,7 +998,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
             </div>
             <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
               {best201
-                ? `Trap ${best201.trap201Kmh?.toFixed(1) ?? '-'} km/h · ${best201.source === 'gps' ? 'GPS' : 'Simulasi'}`
+                ? `30ft ${formatDragSeconds(best201.time30ftMs)} · 60ft ${formatDragSeconds(best201.time60ftMs)} · Trap ${best201.trap201Kmh?.toFixed(1) ?? '-'} km/h`
                 : 'Belum ada catatan 201 m'}
             </div>
           </div>
@@ -853,7 +1015,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
             </div>
             <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
               {best402
-                ? `Trap ${best402.trap402Kmh?.toFixed(1) ?? '-'} km/h · ${best402.source === 'gps' ? 'GPS' : 'Simulasi'}`
+                ? `330ft ${formatDragSeconds(best402.time330ftMs)} · 1000ft ${formatDragSeconds(best402.time1000ftMs)} · Trap ${best402.trap402Kmh?.toFixed(1) ?? '-'} km/h`
                 : 'Belum ada catatan 402 m'}
             </div>
           </div>
@@ -868,7 +1030,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
               Riwayat Catatan Waktu Drag ({runs.length})
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Semua hasil waktu GPS 201 m &amp; 402 m tersimpan otomatis di perangkat Anda.
+              Data jarak 30 ft, 60 ft, 330 ft, 201 m, 1000 ft, dan 402 m tersimpan otomatis.
             </p>
           </div>
           {runs.length > 0 && (
@@ -895,7 +1057,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
 
         {runs.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 py-8 text-center text-xs text-slate-500">
-            Belum ada catatan drag. Pilih target 201 m atau 402 m lalu tekan tombol Mulai Drag untuk merekam waktu pertama Anda.
+            Belum ada catatan drag. Pilih target 201 m atau 402 m lalu tekan tombol Mulai Drag untuk melihat hitung mundur 5 lampu merah → hijau.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -904,9 +1066,11 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                   <th className="py-2 pr-3 font-medium">Waktu</th>
                   <th className="py-2 px-2 font-medium">Mode</th>
+                  <th className="py-2 px-2 font-medium">30 ft</th>
                   <th className="py-2 px-2 font-medium">60 ft</th>
-                  <th className="py-2 px-2 font-medium">0–60</th>
+                  <th className="py-2 px-2 font-medium">330 ft</th>
                   <th className="py-2 px-2 font-medium text-[#FF6B1A]">201 m</th>
+                  <th className="py-2 px-2 font-medium">1000 ft</th>
                   <th className="py-2 px-2 font-medium text-emerald-600 dark:text-emerald-400">402 m</th>
                   <th className="py-2 px-2 font-medium">Top km/h</th>
                   <th className="py-2 pl-2 text-right font-medium">Aksi</th>
@@ -924,14 +1088,17 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
                       })}
                     </td>
                     <td className="py-2.5 px-2 whitespace-nowrap">
-                      {r.source === 'gps' ? 'GPS' : 'Simulasi'} · {r.targetDistance}m
+                      {r.isJumpStart && <span className="text-red-500 font-bold mr-1">FOUL</span>}
+                      {r.source === 'gps' ? 'GPS' : 'Sim'} · {r.targetDistance}m
                     </td>
+                    <td className="py-2.5 px-2 whitespace-nowrap">{formatDragSeconds(r.time30ftMs)}</td>
                     <td className="py-2.5 px-2 whitespace-nowrap">{formatDragSeconds(r.time60ftMs)}</td>
-                    <td className="py-2.5 px-2 whitespace-nowrap">{formatDragSeconds(r.time0to60Ms)}</td>
+                    <td className="py-2.5 px-2 whitespace-nowrap">{formatDragSeconds(r.time330ftMs)}</td>
                     <td className="py-2.5 px-2 whitespace-nowrap font-semibold text-[#FF6B1A]">
                       {formatDragSeconds(r.time201mMs)}
                       {r.trap201Kmh !== null ? ` (${r.trap201Kmh.toFixed(0)})` : ''}
                     </td>
+                    <td className="py-2.5 px-2 whitespace-nowrap">{formatDragSeconds(r.time1000ftMs)}</td>
                     <td className="py-2.5 px-2 whitespace-nowrap font-semibold text-emerald-600 dark:text-emerald-400">
                       {formatDragSeconds(r.time402mMs)}
                       {r.trap402Kmh !== null ? ` (${r.trap402Kmh.toFixed(0)})` : ''}
