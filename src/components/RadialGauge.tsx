@@ -27,7 +27,7 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   accentColor,
   compact = false,
 }) => {
-  const size = compact ? 156 : 196;
+  const size = compact ? 160 : 196;
   const strokeWidth = compact ? 12 : 14;
   const cx = size / 2;
   const cy = size / 2;
@@ -37,7 +37,8 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   const startAngle = 135;
   const sweepAngle = 270;
 
-  const clampRatio = (v: number) => Math.max(0, Math.min(1, (v - min) / Math.max(0.0001, max - min)));
+  const clampRatio = (v: number) =>
+    Math.max(0, Math.min(1, (v - min) / Math.max(0.0001, max - min)));
   const ratio = clampRatio(value);
   const peakRatio = peakValue !== undefined ? clampRatio(peakValue) : null;
 
@@ -50,7 +51,6 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   };
 
   const describeArc = (startDeg: number, endDeg: number, r: number) => {
-    // SVG arc sweep needs clockwise adjustment: 0 deg at top
     const start = polarToCartesian(startDeg + 90, r);
     const end = polarToCartesian(endDeg + 90, r);
     const largeArc = endDeg - startDeg <= 180 ? '0' : '1';
@@ -72,26 +72,28 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
     const deg = startAngle + tRatio * sweepAngle;
     const p1 = polarToCartesian(deg + 90, radius - strokeWidth / 2 - 3);
     const p2 = polarToCartesian(deg + 90, radius - strokeWidth / 2 - 9);
-    const isRed = criticalThreshold !== undefined && min + tRatio * (max - min) >= criticalThreshold;
+    const isRed =
+      criticalThreshold !== undefined &&
+      min + tRatio * (max - min) >= criticalThreshold;
     return { p1, p2, isRed };
   });
 
   const formattedValue = value.toFixed(decimals);
 
   return (
-    <div className="relative flex flex-col items-center justify-center select-none">
+    <div className="relative flex flex-col items-center justify-center select-none w-full">
       <svg
-        width={size}
-        height={size * 0.86}
-        viewBox={`0 0 ${size} ${size * 0.9}`}
-        className="overflow-visible"
+        viewBox={`0 0 ${size} ${size * 0.88}`}
+        className={`w-full h-auto overflow-visible ${
+          compact ? 'max-w-[144px]' : 'max-w-[196px]'
+        }`}
         aria-label={`${label}: ${formattedValue} ${unit}`}
       >
         {/* Background track arc */}
         <path
           d={describeArc(startAngle, startAngle + sweepAngle, radius)}
           fill="none"
-          stroke="rgba(255,255,255,0.08)"
+          className="stroke-slate-200 dark:stroke-slate-800"
           strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
@@ -105,7 +107,7 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
               radius
             )}
             fill="none"
-            stroke="rgba(239,68,68,0.32)"
+            stroke="rgba(239,68,68,0.35)"
             strokeWidth={strokeWidth}
             strokeLinecap="round"
           />
@@ -131,14 +133,19 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
             y1={t.p1.y}
             x2={t.p2.x}
             y2={t.p2.y}
-            stroke={t.isRed ? 'rgba(239,68,68,0.75)' : 'rgba(148,163,184,0.35)'}
+            className={
+              t.isRed
+                ? 'stroke-red-500/80'
+                : 'stroke-slate-400/55 dark:stroke-slate-500/50'
+            }
             strokeWidth={1.75}
             strokeLinecap="round"
           />
         ))}
 
         {/* Peak-hold marker dot */}
-        {peakRatio !== null && peakRatio > 0.02 && (
+        {peakRatio !== null &&
+          peakRatio > 0.02 &&
           (() => {
             const pDeg = startAngle + peakRatio * sweepAngle;
             const pos = polarToCartesian(pDeg + 90, radius);
@@ -147,29 +154,27 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
                 cx={pos.x}
                 cy={pos.y}
                 r={3.5}
-                fill="#F8FAFC"
-                stroke="#0A0D12"
+                className="fill-slate-900 stroke-white dark:fill-white dark:stroke-[#090C10]"
                 strokeWidth={1.5}
               />
             );
-          })()
-        )}
+          })()}
 
         {/* Center numeric readout */}
         <text
           x={cx}
           y={cy + 2}
           textAnchor="middle"
-          className="fill-slate-100 font-mono font-bold tabular-nums"
-          style={{ fontSize: compact ? '24px' : '30px' }}
+          className="fill-slate-900 dark:fill-slate-100 font-mono font-bold tabular-nums"
+          style={{ fontSize: compact ? '23px' : '29px' }}
         >
           {formattedValue}
         </text>
         <text
           x={cx}
-          y={cy + (compact ? 22 : 26)}
+          y={cy + (compact ? 21 : 25)}
           textAnchor="middle"
-          className="fill-slate-400 font-sans font-medium"
+          className="fill-slate-500 dark:fill-slate-400 font-sans font-medium"
           style={{ fontSize: '11px' }}
         >
           {unit}

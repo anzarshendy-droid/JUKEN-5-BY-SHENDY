@@ -18,6 +18,7 @@ import {
   DEFAULT_BLE_CONFIG,
   EngineSimulator,
   JukenBluetoothClient,
+  JukenSerialClient,
 } from './utils/jukenProtocol';
 import {
   deleteSession,
@@ -27,16 +28,18 @@ import {
 } from './utils/logStorage';
 import { DEFAULT_PRESETS, DEFAULT_THRESHOLDS } from './utils/presets';
 import { DashboardView } from './components/DashboardView';
+import { DragView } from './components/DragView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { LogsView } from './components/LogsView';
 import { ConnectionView } from './components/ConnectionView';
 import { OfflineIndicator } from './components/PWAInstallButton';
-import { BarChart3, Bluetooth, FolderClock, Gauge, Radio } from 'lucide-react';
+import { BarChart3, Bluetooth, Flag, FolderClock, Gauge, Radio } from 'lucide-react';
 
 const LS_PRESETS_KEY = 'juken5_presets_v1';
 const LS_ACTIVE_PRESET_KEY = 'juken5_active_preset_v1';
 const LS_THRESHOLDS_KEY = 'juken5_thresholds_v1';
 const LS_BLE_CONFIG_KEY = 'juken5_ble_config_v1';
+const LS_THEME_KEY = 'sag65_theme_v1';
 
 function createZeroPeaks(initial: TelemetryFrame): Record<SensorKey, number> {
   return {
@@ -54,10 +57,35 @@ function createZeroPeaks(initial: TelemetryFrame): Record<SensorKey, number> {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    if (typeof window !== 'undefined') {
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (
+        tab === 'dashboard' ||
+        tab === 'drag' ||
+        tab === 'analytics' ||
+        tab === 'logs' ||
+        tab === 'connection'
+      ) {
+        return tab;
+      }
+    }
+    return 'dashboard';
+  });
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('disconnected');
   const [deviceName, setDeviceName] = useState<string | null>(null);
   const [bleError, setBleError] = useState<string | null>(null);
+
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(LS_THEME_KEY);
+      if (saved === 'light') return false;
+      if (saved === 'dark') return true;
+    } catch {
+      // ignore
+    }
+    return true;
+  });
 
   const [simulatorScenario, setSimulatorScenario] = useState<SimulatorScenario>('dyno');
   const [manualThrottle, setManualThrottle] = useState<number>(45);
@@ -127,6 +155,10 @@ export default function App() {
   if (!bleClientRef.current) {
     bleClientRef.current = new JukenBluetoothClient();
   }
+  const serialClientRef = useRef<JukenSerialClient | null>(null);
+  if (!serialClientRef.current) {
+    serialClientRef.current = new JukenSerialClient();
+  }
   const simulatorRef = useRef<EngineSimulator | null>(null);
   if (!simulatorRef.current) {
     simulatorRef.current = new EngineSimulator();
@@ -138,6 +170,20 @@ export default function App() {
       setToastMsg((prev) => (prev === msg ? null : prev));
     }, 3500);
   }, []);
+
+  // Sync light/dark theme class on <html> and update mobile browser theme-color
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark);
+    try {
+      localStorage.setItem(LS_THEME_KEY, isDark ? 'dark' : 'light');
+    } catch {
+      // ignore
+    }
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) {
+      metaTheme.setAttribute('content', isDark ? '#090C10' : '#F4F6F9');
+    }
+  }, [isDark]);
 
   // Load saved log sessions from IndexedDB on mount
   useEffect(() => {
@@ -239,12 +285,41 @@ export default function App() {
     }
   };
 
+  const handleConnectSerial = async () => {
+    setBleError(null);
+    const client = serialClientRef.current!;
+    try {
+      const res = await client.connect(bleConfig, {
+        onFrame: (f) => handleIncomingFrame(f),
+        onRawPacket: (log) =>
+          setRawLogs((prev) => [log, ...prev].slice(0, 80)),
+        onDisconnect: (reason) => {
+          setConnectionMode('disconnected');
+          setDeviceName(null);
+          if (reason) setBleError(reason);
+        },
+      });
+      setConnectionMode('serial');
+      setDeviceName(res.portLabel);
+      setActiveTab('dashboard');
+      showToast(`Terhubung ke ${res.portLabel}`);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Gagal menghubungkan ke port USB Serial.';
+      if (!/No port selected|cancel/i.test(msg)) {
+        setBleError(msg);
+      }
+    }
+  };
+
   const handleDisconnect = async () => {
     if (isRecording) {
       await handleStopAndSaveRecording();
     }
     if (connectionMode === 'bluetooth') {
       await bleClientRef.current?.disconnect();
+    } else if (connectionMode === 'serial') {
+      await serialClientRef.current?.disconnect();
     }
     setConnectionMode('disconnected');
     setDeviceName(null);
@@ -282,11 +357,18 @@ export default function App() {
       name:
         connectionMode === 'bluetooth'
           ? `Log Juken 5+ (${labelTime})`
+          : connectionMode === 'serial'
+          ? `Log USB Windows (${labelTime})`
           : `Log Simulasi ${simulatorScenario.toUpperCase()} (${labelTime})`,
       createdAt: Date.now(),
       durationMs,
       sampleRateHz: 10,
-      source: connectionMode === 'bluetooth' ? 'bluetooth' : 'simulator',
+      source:
+        connectionMode === 'bluetooth'
+          ? 'bluetooth'
+          : connectionMode === 'serial'
+          ? 'serial'
+          : 'simulator',
       isSample: false,
       frames,
     };
@@ -384,23 +466,24 @@ export default function App() {
     }
   };
 
-  const navItems: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'dashboard', label: 'Dasbor', icon: <Gauge className="w-5 h-5" /> },
-    { id: 'analytics', label: 'Grafik', icon: <BarChart3 className="w-5 h-5" /> },
-    { id: 'logs', label: 'Riwayat Log', icon: <FolderClock className="w-5 h-5" /> },
-    { id: 'connection', label: 'Bluetooth', icon: <Radio className="w-5 h-5" /> },
+  const navItems: { id: ActiveTab; label: string; shortLabel: string; icon: React.ReactNode }[] = [
+    { id: 'dashboard', label: 'Dasbor', shortLabel: 'Dasbor', icon: <Gauge className="w-5 h-5" /> },
+    { id: 'drag', label: 'Drag GPS', shortLabel: 'Drag', icon: <Flag className="w-5 h-5" /> },
+    { id: 'analytics', label: 'Grafik', shortLabel: 'Grafik', icon: <BarChart3 className="w-5 h-5" /> },
+    { id: 'logs', label: 'Riwayat Log', shortLabel: 'Log', icon: <FolderClock className="w-5 h-5" /> },
+    { id: 'connection', label: 'Koneksi', shortLabel: 'Koneksi', icon: <Radio className="w-5 h-5" /> },
   ];
 
   return (
-    <div className="min-h-screen bg-[#0A0D12] text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-[#F4F6F9] dark:bg-[#090C10] text-slate-900 dark:text-slate-100 flex flex-col transition-colors">
       {/* Top Bar Contract: 3 clean zones (Brand wordmark — Nav links — 1 Primary Action) */}
-      <header className="sticky top-0 z-30 h-14 landscape:h-12 md:h-14 border-b border-white/[0.08] bg-[#0A0D12]/90 backdrop-blur-md">
+      <header className="sticky top-0 z-30 h-14 landscape:h-12 md:h-14 border-b border-slate-200 dark:border-slate-800 bg-[#F4F6F9]/90 dark:bg-[#090C10]/90 backdrop-blur-md">
         <div className="max-w-7xl mx-auto h-full px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4 sm:gap-8">
           {/* Zone 1: Single text element Brand wordmark */}
           <button
             type="button"
             onClick={() => setActiveTab('dashboard')}
-            className="font-display text-base sm:text-lg font-bold tracking-tight text-slate-100 whitespace-nowrap shrink-0 text-left"
+            className="font-display text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100 whitespace-nowrap shrink-0 text-left"
           >
             SAG65 Juken 5+
           </button>
@@ -414,8 +497,8 @@ export default function App() {
                 onClick={() => setActiveTab(item.id)}
                 className={`py-1 whitespace-nowrap shrink-0 transition-colors border-b-2 ${
                   activeTab === item.id
-                    ? 'text-orange-400 border-orange-500'
-                    : 'text-slate-400 border-transparent hover:text-slate-100'
+                    ? 'text-[#FF6B1A] border-[#FF6B1A]'
+                    : 'text-slate-600 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-slate-100'
                 }`}
               >
                 {item.label}
@@ -425,14 +508,14 @@ export default function App() {
 
           {/* Zone 3: 1 Primary Action CTA */}
           <div className="flex items-center shrink-0">
-            {connectionMode === 'bluetooth' ? (
+            {connectionMode === 'bluetooth' || connectionMode === 'serial' ? (
               <button
                 type="button"
                 onClick={handleDisconnect}
-                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap shrink-0 hover:bg-emerald-500/25 transition-colors"
+                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap shrink-0 hover:bg-emerald-500/25 transition-colors"
               >
                 <Bluetooth className="w-4 h-4" />
-                <span>Putuskan BLE</span>
+                <span>{connectionMode === 'serial' ? 'Putuskan USB' : 'Putuskan BLE'}</span>
               </button>
             ) : (
               <button
@@ -444,7 +527,7 @@ export default function App() {
                     setActiveTab('connection');
                   }
                 }}
-                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors"
+                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-[#FF6B1A] hover:bg-[#F97316] text-slate-950 text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors"
               >
                 <Bluetooth className="w-4 h-4" />
                 <span>Hubungkan BLE</span>
@@ -477,6 +560,8 @@ export default function App() {
             activePresetId={activePreset.id}
             widgets={activePreset.widgets}
             isLandscapeMode={isLandscapeMode}
+            isDark={isDark}
+            onToggleTheme={() => setIsDark((d) => !d)}
             onToggleLandscape={handleToggleLandscape}
             onSelectPreset={setActivePresetId}
             onSaveAsPreset={handleSaveAsPreset}
@@ -488,6 +573,10 @@ export default function App() {
             onOpenConnect={() => setActiveTab('connection')}
             onStartSimulator={handleStartSimulator}
           />
+        )}
+
+        {activeTab === 'drag' && (
+          <DragView frame={frame} connectionMode={connectionMode} />
         )}
 
         {activeTab === 'analytics' && (
@@ -518,11 +607,13 @@ export default function App() {
             connectionMode={connectionMode}
             deviceName={deviceName}
             bleSupported={bleClientRef.current?.isSupported() ?? false}
+            serialSupported={serialClientRef.current?.isSupported() ?? false}
             bleError={bleError}
             bleConfig={bleConfig}
             thresholds={thresholds}
             rawLogs={rawLogs}
             onConnectBluetooth={handleConnectBluetooth}
+            onConnectSerial={handleConnectSerial}
             onDisconnect={handleDisconnect}
             onStartSimulator={handleStartSimulator}
             onUpdateBleConfig={setBleConfig}
@@ -536,7 +627,7 @@ export default function App() {
       {toastMsg && (
         <div
           role="status"
-          className="fixed bottom-20 md:bottom-6 right-4 z-50 rounded-xl border border-white/[0.14] bg-[#181F2B] px-4 py-2.5 text-xs sm:text-sm font-medium text-slate-100 shadow-xl"
+          className="fixed bottom-20 md:bottom-6 right-4 z-50 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#18202D] px-4 py-2.5 text-xs sm:text-sm font-medium text-slate-900 dark:text-slate-100 shadow-xl"
         >
           {toastMsg}
         </div>
@@ -547,9 +638,9 @@ export default function App() {
       {/* Mobile Portrait Bottom Thumb-Zone Tab Bar (hidden on desktop and mobile landscape) */}
       <nav
         aria-label="Navigasi Smartphone"
-        className="md:hidden landscape:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0A0D12]/95 backdrop-blur-md border-t border-white/[0.08] pb-safe"
+        className="md:hidden landscape:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#F4F6F9]/95 dark:bg-[#090C10]/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 pb-safe"
       >
-        <div className="grid grid-cols-4 h-16 items-center">
+        <div className="grid grid-cols-5 h-16 items-center">
           {navItems.map((item) => {
             const active = activeTab === item.id;
             return (
@@ -558,12 +649,14 @@ export default function App() {
                 type="button"
                 onClick={() => setActiveTab(item.id)}
                 className={`min-h-[44px] flex flex-col items-center justify-center gap-1 transition-colors ${
-                  active ? 'text-orange-400' : 'text-slate-400 hover:text-slate-200'
+                  active
+                    ? 'text-[#FF6B1A]'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 {item.icon}
                 <span className="text-[11px] font-medium tracking-tight leading-none whitespace-nowrap">
-                  {item.label}
+                  {item.shortLabel}
                 </span>
               </button>
             );

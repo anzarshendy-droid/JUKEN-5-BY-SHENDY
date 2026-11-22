@@ -5,6 +5,8 @@ import { exportSessionToCSV } from '../utils/logStorage';
 import {
   buildAndroidBuildConfigJson,
   buildMobileLauncherHtml,
+  buildWindowsBuildConfigJson,
+  buildWindowsLauncherBat,
   deleteDriveFile,
   downloadDriveFileText,
   DriveFileItem,
@@ -113,7 +115,7 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
     if (!token) return;
     setErrorMsg(null);
     setSuccessMsg(null);
-    setBusyMsg('Mengirim peluncur HP & konfigurasi Android ke Google Drive...');
+    setBusyMsg('Mengirim peluncur HP, Windows & konfigurasi APK/MSIX ke Google Drive...');
     try {
       const folderId = await ensureSag65Folder(token);
       const rawOrigin =
@@ -132,15 +134,31 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
 
       await uploadFileToDrive(
         token,
+        'SAG65_Windows_App.bat',
+        buildWindowsLauncherBat(appUrl),
+        'text/plain',
+        folderId
+      );
+
+      await uploadFileToDrive(
+        token,
         'sag65-android-apk-config.json',
         buildAndroidBuildConfigJson(appUrl),
         'application/json',
         folderId
       );
 
+      await uploadFileToDrive(
+        token,
+        'sag65-windows-msix-config.json',
+        buildWindowsBuildConfigJson(appUrl),
+        'application/json',
+        folderId
+      );
+
       await refreshFiles(token);
       setSuccessMsg(
-        'Berhasil! Buka folder "SAG65 Juken 5+" di Google Drive pada HP Anda, lalu buka SAG65_Buka_Di_HP.html di Chrome untuk instal langsung.'
+        'Berhasil! Buka folder "SAG65 Juken 5+" di Drive: gunakan SAG65_Buka_Di_HP.html di Android atau SAG65_Windows_App.bat di laptop Windows.'
       );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Gagal mengunggah ke Google Drive.');
@@ -210,17 +228,17 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
   };
 
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-4 sm:p-5 space-y-4">
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 sm:p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="space-y-1">
-          <h3 className="text-sm sm:text-base font-semibold text-slate-100">
+          <h3 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-100">
             {mode === 'installer'
-              ? 'Kirim ke Google Drive & Persiapan APK Android'
+              ? 'Kirim ke Google Drive (Windows PC & APK Android)'
               : 'Cadangkan & Sinkronkan Log ke Google Drive'}
           </h3>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-600 dark:text-slate-400">
             {mode === 'installer'
-              ? 'Simpan tautan instalasi HP dan konfigurasi build APK Android (TWA/Capacitor) ke folder "SAG65 Juken 5+" di Google Drive Anda.'
+              ? 'Simpan peluncur Windows (.bat), peluncur HP (.html), dan konfigurasi PWABuilder (.apk / .msix) ke folder "SAG65 Juken 5+" di Google Drive.'
               : 'Simpan hasil logging dyno/perjalanan langsung ke Google Drive Anda agar mudah dibuka di perangkat lain.'}
           </p>
         </div>
@@ -230,14 +248,14 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
             <GoogleSignInButton onClick={handleSignIn} disabled={loading} />
           ) : (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-300 truncate max-w-[160px]">
+              <span className="text-xs text-slate-700 dark:text-slate-300 truncate max-w-[160px]">
                 {user?.email || 'Google Drive Terhubung'}
               </span>
               <button
                 type="button"
                 onClick={handleSignOut}
                 title="Keluar dari Google Drive"
-                className="min-h-[40px] px-3 py-1.5 rounded-xl border border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] text-xs font-medium text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
+                className="min-h-[40px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span>Keluar</span>
@@ -248,19 +266,19 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
       </div>
 
       {errorMsg && (
-        <div className="rounded-xl border border-red-500/40 bg-red-950/20 p-3 text-xs text-red-300">
+        <div className="rounded-xl border border-red-500/40 bg-red-50 dark:bg-red-950/25 p-3 text-xs text-red-700 dark:text-red-300">
           {errorMsg}
         </div>
       )}
 
       {successMsg && (
-        <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/20 p-3 text-xs text-emerald-300">
+        <div className="rounded-xl border border-emerald-500/35 bg-emerald-50 dark:bg-emerald-950/25 p-3 text-xs text-emerald-700 dark:text-emerald-300">
           {successMsg}
         </div>
       )}
 
       {busyMsg && (
-        <div className="rounded-xl border border-sky-500/35 bg-sky-950/20 p-3 text-xs text-sky-300">
+        <div className="rounded-xl border border-sky-500/35 bg-sky-50 dark:bg-sky-950/25 p-3 text-xs text-sky-700 dark:text-sky-300">
           {busyMsg}
         </div>
       )}
@@ -273,16 +291,16 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
                 type="button"
                 onClick={handleUploadInstallerToDrive}
                 disabled={!!busyMsg}
-                className="min-h-[44px] px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-slate-950 font-semibold text-xs sm:text-sm flex items-center gap-2 transition-colors whitespace-nowrap"
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-[#FF6B1A] hover:bg-[#F97316] disabled:opacity-50 text-slate-950 font-semibold text-xs sm:text-sm flex items-center gap-2 transition-colors whitespace-nowrap"
               >
                 <CloudUpload className="w-4 h-4" />
-                <span>Simpan Peluncur HP &amp; Config APK ke Drive</span>
+                <span>Simpan Peluncur Windows, HP &amp; Config ke Drive</span>
               </button>
               <a
                 href="https://drive.google.com"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="min-h-[44px] px-4 py-2 rounded-xl border border-white/[0.12] bg-white/[0.04] hover:bg-white/[0.09] text-slate-200 text-xs sm:text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap"
+                className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs sm:text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap"
               >
                 <ExternalLink className="w-4 h-4" />
                 <span>Buka Google Drive</span>
@@ -293,7 +311,7 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
               <select
                 value={selectedLogId}
                 onChange={(e) => setSelectedLogId(e.target.value)}
-                className="flex-1 min-h-[44px] px-3 rounded-xl bg-black/40 border border-white/[0.1] text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-orange-500"
+                className="flex-1 min-h-[44px] px-3 rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#FF6B1A]"
               >
                 {sessions.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -305,7 +323,7 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
                 type="button"
                 onClick={handleUploadLogToDrive}
                 disabled={!!busyMsg || sessions.length === 0}
-                className="min-h-[44px] px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-slate-950 font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-[#FF6B1A] hover:bg-[#F97316] disabled:opacity-50 text-slate-950 font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
               >
                 <CloudUpload className="w-4 h-4" />
                 <span>Upload Log CSV ke Drive</span>
@@ -314,17 +332,17 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
           )}
 
           {/* Drive Folder File List */}
-          <div className="rounded-xl border border-white/[0.07] bg-black/25 p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                <FolderOpen className="w-3.5 h-3.5 text-orange-400" />
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0E14] p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <FolderOpen className="w-3.5 h-3.5 text-[#FF6B1A]" />
                 <span>Isi Folder Google Drive: SAG65 Juken 5+</span>
               </span>
               <button
                 type="button"
                 onClick={() => refreshFiles(token)}
                 disabled={loading}
-                className="min-h-[34px] px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-xs text-slate-300 flex items-center gap-1"
+                className="min-h-[34px] px-2.5 py-1 rounded-lg bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs text-slate-700 dark:text-slate-300 flex items-center gap-1"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
                 <span>Muat Ulang</span>
@@ -336,7 +354,7 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
                 Belum ada file di folder SAG65 Juken 5+ pada Google Drive Anda.
               </p>
             ) : (
-              <div className="divide-y divide-white/[0.06]">
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
                 {files.map((f) => {
                   const isLogFile = /\.(csv|json)$/i.test(f.name) && !f.name.includes('apk-config');
                   return (
@@ -345,7 +363,7 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
                       className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
-                        <div className="text-xs font-medium text-slate-200 truncate">
+                        <div className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">
                           {f.name}
                         </div>
                         <div className="text-[11px] text-slate-500 font-mono">
@@ -360,7 +378,7 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
                           <button
                             type="button"
                             onClick={() => handleImportDriveFile(f)}
-                            className="min-h-[36px] px-2.5 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-xs text-slate-200 whitespace-nowrap"
+                            className="min-h-[36px] px-2.5 py-1 rounded-lg bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs text-slate-800 dark:text-slate-200 whitespace-nowrap"
                           >
                             Buka di Grafik
                           </button>
@@ -370,7 +388,7 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
                             href={f.webViewLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="min-h-[36px] px-2.5 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-xs text-slate-200 inline-flex items-center gap-1 whitespace-nowrap"
+                            className="min-h-[36px] px-2.5 py-1 rounded-lg bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs text-slate-800 dark:text-slate-200 inline-flex items-center gap-1 whitespace-nowrap"
                           >
                             <Smartphone className="w-3.5 h-3.5" />
                             <span>Lihat</span>
@@ -380,7 +398,7 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
                           type="button"
                           onClick={() => setDeleteTarget(f)}
                           title="Hapus dari Google Drive"
-                          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg bg-white/[0.04] hover:bg-red-500/20 hover:text-red-400 text-slate-400 transition-colors"
+                          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg bg-slate-200/60 dark:bg-slate-800/80 hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-400 text-slate-500 dark:text-slate-400 transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -401,27 +419,27 @@ export const GoogleDrivePanel: React.FC<GoogleDrivePanelProps> = ({
           onClick={() => setDeleteTarget(null)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl border border-white/[0.12] bg-[#121720] p-5 space-y-4 shadow-2xl"
+            className="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121721] p-5 space-y-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h4 className="text-base font-semibold text-slate-100">
+            <h4 className="text-base font-semibold text-slate-900 dark:text-slate-100">
               Hapus File dari Google Drive?
             </h4>
-            <p className="text-xs text-slate-300 leading-relaxed">
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
               Anda akan menghapus file <strong>{deleteTarget.name}</strong> dari folder <em>SAG65 Juken 5+</em> di Google Drive Anda. Tindakan ini tidak dapat dibatalkan.
             </p>
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="min-h-[42px] px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs font-medium text-slate-200"
+                className="min-h-[42px] px-4 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-medium text-slate-800 dark:text-slate-200"
               >
                 Batal
               </button>
               <button
                 type="button"
                 onClick={handleConfirmDeleteDriveFile}
-                className="min-h-[42px] px-4 rounded-xl bg-red-500 hover:bg-red-400 text-xs font-semibold text-white"
+                className="min-h-[42px] px-4 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-semibold text-white"
               >
                 Ya, Hapus Permanen
               </button>

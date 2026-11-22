@@ -6,7 +6,15 @@ import {
   SensorKey,
   TelemetryFrame,
 } from '../types/telemetry';
-import { Play, Pause, ZoomIn, ZoomOut, RotateCcw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Pause,
+  Play,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 
 interface AnalyticsViewProps {
   sessions: LogSession[];
@@ -37,14 +45,15 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 }) => {
   const [activeChannels, setActiveChannels] = useState<SensorKey[]>(['rpm', 'afr', 'tps']);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const [zoomSpanRatio, setZoomSpanRatio] = useState<number>(1); // 1 = 100% full, 0.25 = 25% window
-  const [panStartRatio, setPanStartRatio] = useState<number>(0); // 0 .. 1 - zoomSpanRatio
+  const [zoomSpanRatio, setZoomSpanRatio] = useState<number>(1);
+  const [panStartRatio, setPanStartRatio] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [selectedScatterPoint, setSelectedScatterPoint] = useState<TelemetryFrame | null>(null);
+  const [selectedScatterPoint, setSelectedScatterPoint] = useState<TelemetryFrame | null>(
+    null
+  );
 
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Resolve active frames (either live buffer or selected saved session)
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === selectedSessionId) || sessions[0] || null,
     [sessions, selectedSessionId]
@@ -57,7 +66,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     return activeSession?.frames || [];
   }, [selectedSessionId, liveBuffer, activeSession]);
 
-  // Compute zoomed slice
   const { visibleFrames, startIdx } = useMemo(() => {
     if (allFrames.length === 0) return { visibleFrames: [], startIdx: 0 };
     const total = allFrames.length;
@@ -70,7 +78,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     };
   }, [allFrames, zoomSpanRatio, panStartRatio]);
 
-  // Playback cursor loop
   useEffect(() => {
     if (!isPlaying || visibleFrames.length < 2) return;
     const timer = window.setInterval(() => {
@@ -113,7 +120,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     setHoverIdx(idx);
   };
 
-  // Summary statistics & automatic tuning diagnostics
   const stats = useMemo(() => {
     if (allFrames.length === 0) return null;
     let maxRpm = 0;
@@ -189,7 +195,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       ? visibleFrames[hoverIdx]
       : visibleFrames[visibleFrames.length - 1] || null;
 
-  // SVG dimensions for Time-Series
   const W = 860;
   const H = 310;
   const padL = 42;
@@ -201,7 +206,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   const formatTimeSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
-  // Scatter plot dimensions (RPM vs AFR)
   const SW = 860;
   const SH = 260;
   const sPadL = 48;
@@ -220,12 +224,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Top Session Selector Bar */}
-      <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-base sm:text-lg font-semibold text-slate-100">
+          <h2 className="text-base sm:text-lg font-semibold text-slate-900 dark:text-slate-100">
             Analisis Grafik Performa Mesin
           </h2>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Geser jari atau kursor di atas grafik untuk inspeksi nilai sensor per milidetik.
           </p>
         </div>
@@ -244,7 +248,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               setPanStartRatio(0);
               setIsPlaying(false);
             }}
-            className="min-h-[44px] max-w-xs px-3.5 py-2 rounded-xl bg-black/40 border border-white/[0.12] text-sm text-slate-100 focus:outline-none focus:border-orange-500"
+            className="min-h-[44px] max-w-xs px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#FF6B1A]"
           >
             {liveBuffer.length > 0 && (
               <option value="__live__">
@@ -261,11 +265,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       {allFrames.length < 2 ? (
-        <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-8 text-center space-y-2">
-          <p className="text-sm font-medium text-slate-200">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-8 text-center space-y-2">
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
             Belum ada cukup data sampel untuk ditampilkan di grafik.
           </p>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Hubungkan ECU atau aktifkan Mode Simulasi lalu tekan &ldquo;Rekam Log&rdquo; di halaman Dasbor, atau pilih sesi contoh di menu atas.
           </p>
         </div>
@@ -274,32 +278,38 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           {/* Peak KPI Strip */}
           {stats && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-3.5">
-                <div className="text-xs text-slate-400">Puncak RPM</div>
-                <div className="mt-1 font-mono font-bold text-xl sm:text-2xl text-orange-400 tabular-nums">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-3.5">
+                <div className="text-xs text-slate-500 dark:text-slate-400">Puncak RPM</div>
+                <div className="mt-1 font-mono font-bold text-xl sm:text-2xl text-[#FF6B1A] tabular-nums">
                   {stats.maxRpm.toLocaleString('id-ID')}
                 </div>
               </div>
-              <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-3.5">
-                <div className="text-xs text-slate-400">Rata-rata / Rentang AFR</div>
-                <div className="mt-1 font-mono font-bold text-xl sm:text-2xl text-emerald-400 tabular-nums">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-3.5">
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  Rata-rata / Rentang AFR
+                </div>
+                <div className="mt-1 font-mono font-bold text-xl sm:text-2xl text-emerald-600 dark:text-emerald-400 tabular-nums">
                   {stats.avgAfr.toFixed(1)}{' '}
-                  <span className="text-xs font-normal text-slate-400">
+                  <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
                     ({stats.minAfr.toFixed(1)}–{stats.maxAfr.toFixed(1)})
                   </span>
                 </div>
               </div>
-              <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-3.5">
-                <div className="text-xs text-slate-400">Bukaan Gas Maks (TPS)</div>
-                <div className="mt-1 font-mono font-bold text-xl sm:text-2xl text-sky-400 tabular-nums">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-3.5">
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  Bukaan Gas Maks (TPS)
+                </div>
+                <div className="mt-1 font-mono font-bold text-xl sm:text-2xl text-sky-600 dark:text-sky-400 tabular-nums">
                   {stats.maxTps.toFixed(1)}%
                 </div>
               </div>
-              <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-3.5">
-                <div className="text-xs text-slate-400">Suhu Maks / Aki Min</div>
-                <div className="mt-1 font-mono font-bold text-xl sm:text-2xl text-slate-100 tabular-nums">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-3.5">
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  Suhu Maks / Aki Min
+                </div>
+                <div className="mt-1 font-mono font-bold text-xl sm:text-2xl text-slate-900 dark:text-slate-100 tabular-nums">
                   {stats.maxEct}°C{' '}
-                  <span className="text-xs font-normal text-slate-400">
+                  <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
                     · {stats.minBat.toFixed(1)}V
                   </span>
                 </div>
@@ -308,8 +318,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           )}
 
           {/* Main Interactive Multi-Channel Time-Series Chart */}
-          <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-4 space-y-3">
-            {/* Channel toggles + Zoom/Play Controls */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
                 {TRACE_CHANNELS.map((key) => {
@@ -322,13 +331,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                       onClick={() => toggleChannel(key)}
                       className={`min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition-colors whitespace-nowrap ${
                         active
-                          ? 'bg-white/[0.1] border-white/[0.2] text-slate-100'
-                          : 'bg-transparent border-white/[0.06] text-slate-400 hover:text-slate-200'
+                          ? 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100'
+                          : 'bg-transparent border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                       }`}
                     >
                       <span
                         className="w-2.5 h-2.5 rounded-sm shrink-0"
-                        style={{ backgroundColor: active ? meta.color : '#475569' }}
+                        style={{ backgroundColor: active ? meta.color : '#64748B' }}
                       />
                       <span>{meta.shortLabel}</span>
                     </button>
@@ -340,7 +349,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsPlaying((p) => !p)}
-                  className="min-h-[38px] px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-slate-950 text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                  className="min-h-[38px] px-3 py-1.5 rounded-lg bg-[#FF6B1A] hover:bg-[#F97316] text-slate-950 text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
                 >
                   {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                   <span>{isPlaying ? 'Jeda' : 'Putar Ulang'}</span>
@@ -349,7 +358,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   type="button"
                   onClick={() => handleZoom(0.65)}
                   title="Perbesar Grafik (Zoom In)"
-                  className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-slate-200"
+                  className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
                 >
                   <ZoomIn className="w-4 h-4" />
                 </button>
@@ -357,7 +366,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   type="button"
                   onClick={() => handleZoom(1.5)}
                   title="Perkecil Grafik (Zoom Out)"
-                  className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-slate-200"
+                  className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
                 >
                   <ZoomOut className="w-4 h-4" />
                 </button>
@@ -369,7 +378,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                       setPanStartRatio(0);
                     }}
                     title="Reset Zoom"
-                    className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-slate-200"
+                    className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                   </button>
@@ -377,10 +386,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </div>
             </div>
 
-            {/* Synchronized Cursor Readout Bar */}
             {inspectedFrame && (
-              <div className="rounded-xl bg-black/35 border border-white/[0.06] px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                <span className="font-mono text-slate-400 tabular-nums">
+              <div className="rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <span className="font-mono text-slate-500 dark:text-slate-400 tabular-nums">
                   Waktu {formatTimeSec(inspectedFrame.elapsedMs)}
                 </span>
                 {activeChannels.map((ch) => {
@@ -391,8 +399,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         className="w-2 h-2 rounded-sm"
                         style={{ backgroundColor: m.color }}
                       />
-                      <span className="text-slate-400">{m.shortLabel}:</span>
-                      <span className="font-semibold text-slate-100">
+                      <span className="text-slate-500 dark:text-slate-400">{m.shortLabel}:</span>
+                      <span className="font-semibold text-slate-900 dark:text-slate-100">
                         {inspectedFrame[ch].toFixed(m.decimals)} {m.unit}
                       </span>
                     </span>
@@ -401,7 +409,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </div>
             )}
 
-            {/* SVG Multi-Channel Chart */}
             <div className="w-full overflow-hidden touch-none">
               <svg
                 ref={svgRef}
@@ -415,7 +422,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   if (e.touches[0]) handlePointerScrub(e.touches[0].clientX);
                 }}
               >
-                {/* Horizontal grid lines (0%, 25%, 50%, 75%, 100%) */}
                 {[0, 0.25, 0.5, 0.75, 1].map((g) => {
                   const y = padT + (1 - g) * innerH;
                   return (
@@ -425,14 +431,14 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         y1={y}
                         x2={W - padR}
                         y2={y}
-                        stroke="rgba(255,255,255,0.06)"
+                        className="stroke-slate-200 dark:stroke-slate-800"
                         strokeDasharray="3 3"
                       />
                       <text
                         x={padL - 6}
                         y={y + 3}
                         textAnchor="end"
-                        className="fill-slate-500 font-mono"
+                        className="fill-slate-400 dark:fill-slate-500 font-mono"
                         style={{ fontSize: '10px' }}
                       >
                         {Math.round(g * 100)}%
@@ -441,7 +447,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   );
                 })}
 
-                {/* Channel traces (normalized to each sensor's operating range) */}
                 {activeChannels.map((ch) => {
                   const meta = SENSOR_CATALOG[ch];
                   const pts = visibleFrames
@@ -475,7 +480,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   );
                 })}
 
-                {/* Time axis labels */}
                 {[0, 0.25, 0.5, 0.75, 1].map((t) => {
                   const idx = Math.min(
                     visibleFrames.length - 1,
@@ -489,7 +493,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                       x={x}
                       y={H - 8}
                       textAnchor="middle"
-                      className="fill-slate-500 font-mono"
+                      className="fill-slate-400 dark:fill-slate-500 font-mono"
                       style={{ fontSize: '10px' }}
                     >
                       {f ? formatTimeSec(f.elapsedMs) : ''}
@@ -497,8 +501,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   );
                 })}
 
-                {/* Interactive Crosshair Vertical Line + Dots */}
-                {hoverIdx !== null && visibleFrames[hoverIdx] && (
+                {hoverIdx !== null &&
+                  visibleFrames[hoverIdx] &&
                   (() => {
                     const cx =
                       padL +
@@ -511,7 +515,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                           y1={padT}
                           x2={cx}
                           y2={padT + innerH}
-                          stroke="rgba(248,250,252,0.55)"
+                          className="stroke-slate-700/60 dark:stroke-slate-200/60"
                           strokeWidth={1.25}
                         />
                         {activeChannels.map((ch) => {
@@ -531,22 +535,22 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                               cy={cy}
                               r={4}
                               fill={meta.color}
-                              stroke="#0A0D12"
+                              className="stroke-white dark:stroke-[#090C10]"
                               strokeWidth={1.5}
                             />
                           );
                         })}
                       </g>
                     );
-                  })()
-                )}
+                  })()}
               </svg>
             </div>
 
-            {/* Pan slider when zoomed in */}
             {zoomSpanRatio < 0.99 && (
               <div className="flex items-center gap-3 pt-1">
-                <span className="text-xs text-slate-400 whitespace-nowrap">Geser Rentang</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                  Geser Rentang
+                </span>
                 <input
                   type="range"
                   min={0}
@@ -557,9 +561,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                     setPanStartRatio(parseFloat(e.target.value));
                     setHoverIdx(null);
                   }}
-                  className="flex-1 accent-orange-500 h-2 cursor-pointer"
+                  className="flex-1 accent-[#FF6B1A] h-2 cursor-pointer"
                 />
-                <span className="text-xs font-mono text-slate-400 tabular-nums whitespace-nowrap">
+                <span className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
                   Sampel {startIdx + 1}–{startIdx + visibleFrames.length}
                 </span>
               </div>
@@ -568,23 +572,23 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
           {/* RPM vs AFR Tuning Scatter Plot + Engine Insights */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 rounded-2xl border border-white/[0.08] bg-[#121720] p-4 space-y-3">
+            <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-100">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                     Peta Korelasi RPM vs AFR (Tuning Fuel Map)
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Zona hijau menandakan target tenaga optimal (12.2–13.4). Ketuk titik untuk detail.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#FF6B1A]" />
                     Gas &gt;70%
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-400" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
                     Gas 25–70%
                   </span>
                   <span className="flex items-center gap-1">
@@ -595,7 +599,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </div>
 
               <svg viewBox={`0 0 ${SW} ${SH}`} className="w-full h-auto max-h-[260px]">
-                {/* Target AFR Power Band (12.2 - 13.4) */}
                 {(() => {
                   const afrMin = 10;
                   const afrMax = 18;
@@ -609,21 +612,21 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         y={yTop}
                         width={sInnerW}
                         height={Math.max(2, yBot - yTop)}
-                        fill="rgba(16,185,129,0.1)"
+                        fill="rgba(16,185,129,0.12)"
                       />
                       <line
                         x1={sPadL}
                         y1={yStoich}
                         x2={SW - sPadR}
                         y2={yStoich}
-                        stroke="rgba(245,158,11,0.45)"
+                        stroke="rgba(245,158,11,0.55)"
                         strokeDasharray="4 4"
                       />
                       <text
                         x={SW - sPadR - 4}
                         y={yStoich - 4}
                         textAnchor="end"
-                        className="fill-amber-400 font-mono"
+                        className="fill-amber-600 dark:fill-amber-400 font-mono"
                         style={{ fontSize: '10px' }}
                       >
                         Stoich 14.7
@@ -632,7 +635,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   );
                 })()}
 
-                {/* Y Axis AFR ticks */}
                 {[10, 12, 14, 16, 18].map((afrTick) => {
                   const y = sPadT + ((18 - afrTick) / 8) * sInnerH;
                   return (
@@ -642,13 +644,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         y1={y}
                         x2={SW - sPadR}
                         y2={y}
-                        stroke="rgba(255,255,255,0.06)"
+                        className="stroke-slate-200 dark:stroke-slate-800"
                       />
                       <text
                         x={sPadL - 8}
                         y={y + 3}
                         textAnchor="end"
-                        className="fill-slate-400 font-mono"
+                        className="fill-slate-400 dark:fill-slate-500 font-mono"
                         style={{ fontSize: '10px' }}
                       >
                         {afrTick.toFixed(0)}
@@ -657,7 +659,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   );
                 })}
 
-                {/* X Axis RPM ticks */}
                 {[2000, 4000, 6000, 8000, 10000, 12000, 14000].map((rpmTick) => {
                   const x = sPadL + (rpmTick / 14000) * sInnerW;
                   return (
@@ -667,13 +668,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         y1={sPadT}
                         x2={x}
                         y2={sPadT + sInnerH}
-                        stroke="rgba(255,255,255,0.05)"
+                        className="stroke-slate-100 dark:stroke-slate-800/80"
                       />
                       <text
                         x={x}
                         y={SH - 10}
                         textAnchor="middle"
-                        className="fill-slate-400 font-mono"
+                        className="fill-slate-400 dark:fill-slate-500 font-mono"
                         style={{ fontSize: '10px' }}
                       >
                         {rpmTick / 1000}k
@@ -682,12 +683,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   );
                 })}
 
-                {/* Scatter dots */}
                 {scatterFrames.map((f, idx) => {
                   const cx = sPadL + Math.max(0, Math.min(1, f.rpm / 14000)) * sInnerW;
-                  const cy = sPadT + Math.max(0, Math.min(1, (18 - f.afr) / 8)) * sInnerH;
+                  const cy =
+                    sPadT + Math.max(0, Math.min(1, (18 - f.afr) / 8)) * sInnerH;
                   const fill =
-                    f.tps >= 70 ? '#F97316' : f.tps >= 25 ? '#38BDF8' : '#94A3B8';
+                    f.tps >= 70 ? '#FF6B1A' : f.tps >= 25 ? '#0EA5E9' : '#94A3B8';
                   const isSel = selectedScatterPoint?.timestamp === f.timestamp;
                   return (
                     <circle
@@ -696,10 +697,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                       cy={cy}
                       r={isSel ? 6 : 3.6}
                       fill={fill}
-                      fillOpacity={isSel ? 1 : 0.78}
-                      stroke={isSel ? '#FFFFFF' : 'none'}
+                      fillOpacity={isSel ? 1 : 0.8}
+                      className={isSel ? 'stroke-slate-900 dark:stroke-white cursor-pointer' : 'cursor-pointer'}
                       strokeWidth={1.5}
-                      className="cursor-pointer"
                       onClick={() => setSelectedScatterPoint(f)}
                     />
                   );
@@ -707,7 +707,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </svg>
 
               {selectedScatterPoint && (
-                <div className="rounded-xl bg-black/35 border border-white/[0.06] px-3 py-2 text-xs font-mono tabular-nums text-slate-200 flex flex-wrap gap-x-4 gap-y-1">
+                <div className="rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs font-mono tabular-nums text-slate-800 dark:text-slate-200 flex flex-wrap gap-x-4 gap-y-1">
                   <span>RPM: {selectedScatterPoint.rpm}</span>
                   <span>AFR: {selectedScatterPoint.afr.toFixed(1)}</span>
                   <span>TPS: {selectedScatterPoint.tps.toFixed(1)}%</span>
@@ -717,9 +717,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               )}
             </div>
 
-            {/* Automated Tuning Insights */}
-            <div className="rounded-2xl border border-white/[0.08] bg-[#121720] p-4 space-y-3">
-              <h3 className="text-sm font-semibold text-slate-100">
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Ringkasan &amp; Catatan Tuning
               </h3>
               {stats && (
@@ -729,14 +728,14 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                       key={idx}
                       className={`rounded-xl border p-3 text-xs leading-relaxed flex items-start gap-2.5 ${
                         item.level === 'warning'
-                          ? 'border-amber-500/35 bg-amber-950/15 text-amber-200'
-                          : 'border-emerald-500/30 bg-emerald-950/15 text-emerald-200'
+                          ? 'border-amber-500/40 bg-amber-50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200'
+                          : 'border-emerald-500/35 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200'
                       }`}
                     >
                       {item.level === 'warning' ? (
-                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                       ) : (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                       )}
                       <span>{item.text}</span>
                     </div>
@@ -745,8 +744,10 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               )}
 
               {activeSession?.notes && selectedSessionId !== '__live__' && (
-                <div className="pt-2 border-t border-white/[0.06] text-xs text-slate-400 leading-relaxed">
-                  <span className="font-medium text-slate-300">Catatan Sesi: </span>
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    Catatan Sesi:{' '}
+                  </span>
                   {activeSession.notes}
                 </div>
               )}

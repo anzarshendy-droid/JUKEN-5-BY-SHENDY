@@ -34,6 +34,7 @@ export const DEFAULT_BLE_CONFIG: BluetoothConfig = {
   protocol: 'auto',
   pollCommandHex: 'AA 55 01 00 55',
   pollIntervalMs: 100,
+  serialBaudRate: 38400,
 };
 
 export function bytesToHex(bytes: Uint8Array): string {
@@ -365,6 +366,181 @@ export class JukenBluetoothClient {
     this.device = null;
     this.rxChar = null;
     this.txChar = null;
+  }
+}
+
+/**
+ * Windows / Desktop Web Serial client for USB-TTL / FTDI / CH340 / CP2102 or Bluetooth SPP COM ports.
+ */
+export class JukenSerialClient {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private port: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private reader: any = null;
+  private pollTimer: number | null = null;
+  private keepReading = false;
+  private asciiBuffer = '';
+  private startTime = Date.now();
+  private lastFrame: TelemetryFrame = createInitialFrame();
+
+  public isSupported(): boolean {
+    return typeof navigator !== 'undefined' && 'serial' in navigator;
+  }
+
+  public async connect(
+    config: BluetoothConfig,
+    callbacks: {
+      onFrame: (frame: TelemetryFrame) => void;
+      onRawPacket: (log: RawPacketLog) => void;
+      onDisconnect: (reason?: string) => void;
+    }
+  ): Promise<{ portLabel: string; baudRate: number }> {
+    if (!this.isSupported()) {
+      throw new Error(
+        'Browser ini tidak mendukung Web Serial API. Gunakan Google Chrome atau Microsoft Edge di Windows 10/11.'
+      );
+    }
+
+    const baudRate = config.serialBaudRate && config.serialBaudRate > 0 ? config.serialBaudRate : 38400;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nav = navigator as any;
+    const port = await nav.serial.requestPort();
+    await port.open({ baudRate });
+
+    this.port = port;
+    this.startTime = Date.now();
+    this.asciiBuffer = '';
+    this.keepReading = true;
+
+    const info = typeof port.getInfo === 'function' ? port.getInfo() : {};
+    const portLabel = info.usbVendorId
+      ? `USB Serial (${info.usbVendorId.toString(16).toUpperCase()}:${(info.usbProductId || 0)
+          .toString(16)
+          .toUpperCase()})`
+      : `COM Port (${baudRate} bps)`;
+
+    callbacks.onRawPacket({
+      id: `${Date.now()}-serial-info`,
+      timestamp: Date.now(),
+      direction: 'info',
+      hex: '-',
+      ascii: `Terhubung via ${portLabel} @ ${baudRate} baud`,
+    });
+
+    // Optional polling loop for active ECU request frames
+    if (port.writable && config.pollCommandHex.trim().length > 0 && config.pollIntervalMs >= 40) {
+      const cmdBytes = hexToBytes(config.pollCommandHex);
+      if (cmdBytes.length > 0) {
+        this.pollTimer = window.setInterval(async () => {
+          if (!this.port?.writable || !this.keepReading) return;
+          const writer = this.port.writable.getWriter();
+          try {
+            await writer.write(cmdBytes);
+          } catch {
+            // ignore transient write error
+          } finally {
+            writer.releaseLock();
+          }
+        }, config.pollIntervalMs);
+      }
+    }
+
+    // Background async read loop
+    (async () => {
+      try {
+        while (this.port?.readable && this.keepReading) {
+          this.reader = this.port.readable.getReader();
+          try {
+            while (this.keepReading) {
+              const { value, done } = await this.reader.read();
+              if (done) break;
+              if (!value || value.length === 0) continue;
+
+              const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+              callbacks.onRawPacket({
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                timestamp: Date.now(),
+                direction: 'rx',
+                hex: bytesToHex(bytes),
+                ascii: bytesToPrintableAscii(bytes),
+              });
+
+              const directFrame = parseJukenPacket(
+                bytes,
+                config.protocol,
+                this.startTime,
+                this.lastFrame
+              );
+              if (directFrame) {
+                this.lastFrame = directFrame;
+                callbacks.onFrame(directFrame);
+                continue;
+              }
+
+              this.asciiBuffer += new TextDecoder().decode(bytes);
+              if (this.asciiBuffer.includes('\n') || this.asciiBuffer.includes('\r')) {
+                const lines = this.asciiBuffer.split(/[\r\n]+/);
+                this.asciiBuffer = lines.pop() || '';
+                for (const line of lines) {
+                  if (!line.trim()) continue;
+                  const lineBytes = new TextEncoder().encode(line);
+                  const parsed = parseJukenPacket(
+                    lineBytes,
+                    config.protocol,
+                    this.startTime,
+                    this.lastFrame
+                  );
+                  if (parsed) {
+                    this.lastFrame = parsed;
+                    callbacks.onFrame(parsed);
+                  }
+                }
+              }
+              if (this.asciiBuffer.length > 512) {
+                this.asciiBuffer = this.asciiBuffer.slice(-128);
+              }
+            }
+          } finally {
+            this.reader?.releaseLock();
+            this.reader = null;
+          }
+        }
+      } catch {
+        if (this.keepReading) {
+          callbacks.onDisconnect('Koneksi kabel USB / COM Port terputus.');
+        }
+      }
+    })();
+
+    return { portLabel, baudRate };
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  public async disconnect(): Promise<void> {
+    this.keepReading = false;
+    this.stopPolling();
+    try {
+      if (this.reader) {
+        await this.reader.cancel();
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      if (this.port) {
+        await this.port.close();
+      }
+    } catch {
+      // ignore
+    }
+    this.reader = null;
+    this.port = null;
   }
 }
 

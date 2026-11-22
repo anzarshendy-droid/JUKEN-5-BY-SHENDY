@@ -262,3 +262,62 @@ export function buildAndroidBuildConfigJson(appUrl: string): string {
     2
   );
 }
+
+export function buildWindowsLauncherBat(appUrl: string): string {
+  return [
+    '@echo off',
+    'title SAG65 Juken 5+ Telemetry (Windows Desktop)',
+    'set "APP_URL=' + appUrl + '"',
+    '',
+    ':: Cari Microsoft Edge (Chromium) terlebih dahulu untuk App Mode Windows 10/11',
+    'if exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" (',
+    '  start "" "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" --app="%APP_URL%" --window-size=1280,800',
+    '  exit /b',
+    ')',
+    'if exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" (',
+    '  start "" "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" --app="%APP_URL%" --window-size=1280,800',
+    '  exit /b',
+    ')',
+    '',
+    ':: Fallback ke Google Chrome App Mode',
+    'if exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (',
+    '  start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --app="%APP_URL%" --window-size=1280,800',
+    '  exit /b',
+    ')',
+    'if exist "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" (',
+    '  start "" "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" --app="%APP_URL%" --window-size=1280,800',
+    '  exit /b',
+    ')',
+    '',
+    ':: Fallback ke browser default Windows',
+    'start "" "%APP_URL%"',
+  ].join('\r\n');
+}
+
+export function buildWindowsBuildConfigJson(appUrl: string): string {
+  const host = appUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  return JSON.stringify(
+    {
+      appName: 'SAG65 Juken 5+',
+      packageName: 'SAG65.Juken5Telemetry',
+      publisherDisplayName: 'SAG65 Motorsport',
+      version: '1.0.0.0',
+      startUrl: appUrl,
+      host,
+      features: {
+        webBluetoothWindows: true,
+        webSerialUsbComPort: true,
+        offlineServiceWorker: true,
+        desktopShortcuts: true,
+      },
+      buildWindowsMsixSteps: [
+        '1. Buka https://www.pwabuilder.com di browser dan masukkan URL: ' + appUrl,
+        '2. Pilih Package for Stores -> Windows -> Generate Package untuk mengunduh paket .msix (Windows 10/11).',
+        '3. Atau langsung pasang dari Microsoft Edge / Google Chrome di Windows via ikon Install (+) di address bar, atau jalankan file SAG65_Windows_App.bat.',
+      ],
+    },
+    null,
+    2
+  );
+}
+

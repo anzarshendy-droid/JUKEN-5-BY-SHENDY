@@ -29,14 +29,14 @@ class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#0A0D12] text-slate-100 flex items-center justify-center p-6">
-          <div className="max-w-md w-full rounded-2xl border border-red-500/40 bg-[#121720] p-6 space-y-4">
-            <h1 className="text-lg font-semibold text-red-300">Terjadi Kendala Tampilan</h1>
-            <p className="text-xs text-slate-300 font-mono break-words">{this.state.message}</p>
+        <div className="min-h-screen bg-[#F4F6F9] dark:bg-[#090C10] text-slate-900 dark:text-slate-100 flex items-center justify-center p-6">
+          <div className="max-w-md w-full rounded-2xl border border-red-500/40 bg-white dark:bg-[#121721] p-6 space-y-4">
+            <h1 className="text-lg font-semibold text-red-600 dark:text-red-300">Terjadi Kendala Tampilan</h1>
+            <p className="text-xs text-slate-600 dark:text-slate-300 font-mono break-words">{this.state.message}</p>
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="min-h-[44px] px-4 py-2 rounded-xl bg-orange-500 text-slate-950 font-semibold text-sm"
+              className="min-h-[44px] px-4 py-2 rounded-xl bg-[#FF6B1A] hover:bg-[#F97316] text-slate-950 font-semibold text-sm"
             >
               Muat Ulang Aplikasi
             </button>

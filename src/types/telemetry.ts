@@ -46,7 +46,7 @@ export const SENSOR_CATALOG: Record<SensorKey, SensorMeta> = {
     min: 0,
     max: 14000,
     decimals: 0,
-    color: '#F97316',
+    color: '#FF6B1A',
     description: 'Kecepatan putaran poros engkol mesin per menit',
   },
   afr: {
@@ -68,7 +68,7 @@ export const SENSOR_CATALOG: Record<SensorKey, SensorMeta> = {
     min: 0,
     max: 100,
     decimals: 1,
-    color: '#38BDF8',
+    color: '#0EA5E9',
     description: 'Persentase bukaan katup throttle body',
   },
   map: {
@@ -79,7 +79,7 @@ export const SENSOR_CATALOG: Record<SensorKey, SensorMeta> = {
     min: 15,
     max: 110,
     decimals: 0,
-    color: '#A78BFA',
+    color: '#14B8A6',
     description: 'Tekanan vakum / absolut di intake manifold',
   },
   ect: {
@@ -101,7 +101,7 @@ export const SENSOR_CATALOG: Record<SensorKey, SensorMeta> = {
     min: 15,
     max: 80,
     decimals: 0,
-    color: '#2DD4BF',
+    color: '#06B6D4',
     description: 'Temperatur udara yang masuk ke throttle body',
   },
   battery: {
@@ -112,7 +112,7 @@ export const SENSOR_CATALOG: Record<SensorKey, SensorMeta> = {
     min: 10.0,
     max: 15.5,
     decimals: 1,
-    color: '#60A5FA',
+    color: '#EAB308',
     description: 'Voltase sistem pengisian dan aki motor',
   },
   ignTiming: {
@@ -123,7 +123,7 @@ export const SENSOR_CATALOG: Record<SensorKey, SensorMeta> = {
     min: 0,
     max: 45,
     decimals: 1,
-    color: '#FB7185',
+    color: '#F43F5E',
     description: 'Sudut pengapian sebelum titik mati atas',
   },
   injWidth: {
@@ -134,7 +134,7 @@ export const SENSOR_CATALOG: Record<SensorKey, SensorMeta> = {
     min: 0,
     max: 16,
     decimals: 2,
-    color: '#C084FC',
+    color: '#3B82F6',
     description: 'Lebar pulsa penyemprotan bahan bakar injektor',
   },
   speed: {
@@ -145,7 +145,7 @@ export const SENSOR_CATALOG: Record<SensorKey, SensorMeta> = {
     min: 0,
     max: 200,
     decimals: 0,
-    color: '#E2E8F0',
+    color: '#94A3B8',
     description: 'Kecepatan roda kendaraan dari sensor VSS',
   },
 };
@@ -187,6 +187,7 @@ export interface BluetoothConfig {
   protocol: PacketProtocol;
   pollCommandHex: string;
   pollIntervalMs: number;
+  serialBaudRate?: number;
 }
 
 export interface RawPacketLog {
@@ -209,4 +210,25 @@ export interface LogSession {
   frames: TelemetryFrame[];
 }
 
-export type ActiveTab = 'dashboard' | 'analytics' | 'logs' | 'connection';
+export type ActiveTab = 'dashboard' | 'drag' | 'analytics' | 'logs' | 'connection';
+
+export type DragTargetDistance = 201 | 402;
+
+export interface DragRunRecord {
+  id: string;
+  createdAt: number;
+  source: 'gps' | 'simulator';
+  targetDistance: DragTargetDistance;
+  reactionTimeMs: number | null;
+  time60ftMs: number | null;
+  time0to60Ms: number | null;
+  time0to100Ms: number | null;
+  time201mMs: number | null;
+  trap201Kmh: number | null;
+  time402mMs: number | null;
+  trap402Kmh: number | null;
+  peakSpeedKmh: number;
+  peakRpm: number;
+  gpsAccuracyM: number | null;
+}
+

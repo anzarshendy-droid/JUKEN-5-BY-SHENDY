@@ -10,9 +10,14 @@
 
   html {
     font-family: var(--font-sans);
-    background-color: #0A0D12;
-    color: #F1F5F9;
+    background-color: #F4F6F9;
+    color: #0F172A;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  html.dark {
+    background-color: #090C10;
+    color: #F1F5F9;
   }
 
   h1, h2, h3, .font-display {
@@ -36,16 +41,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.4);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.25);
+  background: rgba(100, 116, 139, 0.35);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.45);
+  background: rgba(100, 116, 139, 0.55);
 }
 
 /* Safe area padding for iOS/Android bottom bars */
