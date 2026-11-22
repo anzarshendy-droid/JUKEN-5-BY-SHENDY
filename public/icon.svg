@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#0A0D12" />
+  <circle cx="256" cy="240" r="176" fill="none" stroke="#1E293B" stroke-width="26" stroke-dasharray="776 340" stroke-dashoffset="-130" stroke-linecap="round" />
+  <circle cx="256" cy="240" r="176" fill="none" stroke="#F97316" stroke-width="26" stroke-dasharray="530 999" stroke-dashoffset="-130" stroke-linecap="round" />
+  <path d="M256 240 L358 138" stroke="#F8FAFC" stroke-width="18" stroke-linecap="round" />
+  <circle cx="256" cy="240" r="22" fill="#F97316" />
+  <text x="256" y="422" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="800" font-size="76" letter-spacing="2" fill="#F8FAFC">SAG65</text>
+</svg>
