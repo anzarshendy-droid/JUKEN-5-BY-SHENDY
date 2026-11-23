@@ -126,7 +126,7 @@ class MainActivity : Activity() {
                 { device.createRfcommSocketToServiceRecord(SPP_UUID) },
                 { device.createInsecureRfcommSocketToServiceRecord(SPP_UUID) },
                 {
-                    val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                    val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType!!)
                     method.invoke(device, 1) as BluetoothSocket
                 }
             )

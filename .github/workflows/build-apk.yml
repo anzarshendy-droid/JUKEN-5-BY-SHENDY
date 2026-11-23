@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - '**/android-apk-bridge/**'
       - 'android-apk-bridge/**'
       - '.github/workflows/build-apk.yml'
 
@@ -26,17 +27,35 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Accept Android SDK Licenses
+        shell: bash
+        run: |
+          if [ -n "${ANDROID_HOME:-}" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          fi
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Build Debug APK
-        working-directory: android-apk-bridge
-        run: gradle assembleDebug
+      - name: Locate Android Project & Build Debug APK
+        shell: bash
+        run: |
+          SETTINGS_FILE=$(find . -maxdepth 4 -name 'settings.gradle.kts' | head -n 1)
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: Folder android-apk-bridge (settings.gradle.kts) tidak ditemukan di repository GitHub ini."
+            echo "Pastikan isi SAG65_GitHub_APK_Kit.zip sudah diekstrak dan diunggah ke repository."
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          echo "Building Android project in: $PROJECT_DIR"
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --no-daemon
 
       - name: Upload SAG65 Juken 5+ APK
         uses: actions/upload-artifact@v4
         with:
           name: SAG65-Juken5-Android-APK
-          path: android-apk-bridge/app/build/outputs/apk/debug/app-debug.apk
+          path: '**/app/build/outputs/apk/debug/app-debug.apk'
+          if-no-files-found: error
