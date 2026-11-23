@@ -17,6 +17,7 @@ export default defineConfig(() => {
           'apple-touch-icon.png',
           'pwa-192x192.png',
           'pwa-512x512.png',
+          'pwa-maskable-512x512.png',
           'screenshot-mobile.png',
           'screenshot-wide.png',
         ],

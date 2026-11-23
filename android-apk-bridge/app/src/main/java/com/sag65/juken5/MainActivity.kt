@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -47,6 +48,10 @@ class MainActivity : Activity() {
             settings.databaseEnabled = true
             settings.setGeolocationEnabled(true)
             settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            settings.userAgentString = settings.userAgentString.replace("; wv", "")
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webViewClient = WebViewClient()
             webChromeClient = object : WebChromeClient() {
                 override fun onGeolocationPermissionsShowPrompt(
@@ -106,21 +111,45 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun connect(address: String): Boolean {
             disconnect()
-            return try {
-                val adapter = getBtAdapter() ?: return false
+            val adapter = getBtAdapter() ?: return false
+            try {
                 adapter.cancelDiscovery()
-                val device = adapter.getRemoteDevice(address)
-                val socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
-                socket.connect()
-                btSocket = socket
-                btOut = socket.outputStream
-                reading = true
-                startReaderThread(socket.inputStream)
-                true
             } catch (_: Exception) {
-                disconnect()
-                false
             }
+            val device = try {
+                adapter.getRemoteDevice(address)
+            } catch (_: Exception) {
+                return false
+            }
+
+            val socketCandidates = listOf<() -> BluetoothSocket>(
+                { device.createRfcommSocketToServiceRecord(SPP_UUID) },
+                { device.createInsecureRfcommSocketToServiceRecord(SPP_UUID) },
+                {
+                    val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                    method.invoke(device, 1) as BluetoothSocket
+                }
+            )
+
+            for (createSocket in socketCandidates) {
+                var candidate: BluetoothSocket? = null
+                try {
+                    candidate = createSocket()
+                    candidate.connect()
+                    btSocket = candidate
+                    btOut = candidate.outputStream
+                    reading = true
+                    startReaderThread(candidate.inputStream)
+                    return true
+                } catch (_: Exception) {
+                    try {
+                        candidate?.close()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+            disconnect()
+            return false
         }
 
         @JavascriptInterface
@@ -174,6 +203,7 @@ class MainActivity : Activity() {
         }
     }
 
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
         if (this::webView.isInitialized && webView.canGoBack()) {
             webView.goBack()

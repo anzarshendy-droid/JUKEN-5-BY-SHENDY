@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useOnlineStatus, usePWAInstall } from '../hooks/usePWA';
 import { buildWindowsLauncherBat } from '../utils/googleDrive';
-import { Check, Copy, Download, ExternalLink, Monitor, Smartphone, WifiOff } from 'lucide-react';
+import { downloadGithubApkKitZip } from '../utils/githubApkKit';
+import { Check, Copy, Download, ExternalLink, GitBranch, Monitor, Smartphone, WifiOff } from 'lucide-react';
 
 export const PWAInstallButton: React.FC = () => {
   const { isInstallable, isInstalled, isIOS, isWindows, install } = usePWAInstall();
@@ -15,12 +16,11 @@ export const PWAInstallButton: React.FC = () => {
     }
   }, [isWindows]);
 
-  if (isInstalled) {
-    return null;
-  }
-
   const rawOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const appUrl = rawOrigin.replace('https://ais-dev-', 'https://ais-pre-');
+  const pwaBuilderUrl = appUrl
+    ? `https://www.pwabuilder.com/reportcard?site=${encodeURIComponent(appUrl)}`
+    : 'https://www.pwabuilder.com';
 
   const handleCopy = async (key: string, value: string) => {
     try {
@@ -48,7 +48,7 @@ export const PWAInstallButton: React.FC = () => {
 
   return (
     <>
-      {isInstallable ? (
+      {isInstallable && !isInstalled && (
         <button
           type="button"
           onClick={install}
@@ -57,20 +57,19 @@ export const PWAInstallButton: React.FC = () => {
           <Download className="w-4 h-4 text-[#FF6B1A]" />
           <span>{isWindows ? 'Pasang Aplikasi Windows' : 'Download ke HP'}</span>
         </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setShowGuide(true)}
-          className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-medium text-xs sm:text-sm flex items-center gap-2 transition-colors whitespace-nowrap"
-        >
-          {isWindows ? (
-            <Monitor className="w-4 h-4 text-[#FF6B1A]" />
-          ) : (
-            <Smartphone className="w-4 h-4 text-[#FF6B1A]" />
-          )}
-          <span>Pasang di Windows / HP</span>
-        </button>
       )}
+      <button
+        type="button"
+        onClick={() => setShowGuide(true)}
+        className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-medium text-xs sm:text-sm flex items-center gap-2 transition-colors whitespace-nowrap"
+      >
+        {isWindows ? (
+          <Monitor className="w-4 h-4 text-[#FF6B1A]" />
+        ) : (
+          <Smartphone className="w-4 h-4 text-[#FF6B1A]" />
+        )}
+        <span>Buat .APK / Windows</span>
+      </button>
 
       {showGuide && (
         <div
@@ -240,18 +239,55 @@ export const PWAInstallButton: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                    Untuk <strong>.APK standar</strong> (Drag GPS + Gyro Oz + BLE), tempel URL di atas ke PWABuilder. Untuk <strong>.APK dengan Bluetooth Classic PIN (BRT JUKEN)</strong>, gunakan folder proyek <code>android-apk-bridge</code> &amp; workflow GitHub Actions yang sudah tersedia.
-                  </p>
+                  <ol className="text-[11px] text-slate-600 dark:text-slate-400 list-decimal list-inside space-y-1 leading-relaxed">
+                    <li>
+                      Ketuk tombol <strong>Buka PWABuilder</strong> di bawah (URL sudah terisi otomatis).
+                    </li>
+                    <li>
+                      Tunggu scan selesai → ketuk <strong>Package for Stores</strong> → pilih <strong>Android → Generate Package</strong> → pilih Signing Key <strong>New</strong> → <strong>Download Package</strong>.
+                    </li>
+                    <li>
+                      Ekstrak file <code>.zip</code> hasil unduhan → pasang file <code>.apk</code> di HP Anda.
+                    </li>
+                  </ol>
                   <a
-                    href="https://www.pwabuilder.com"
+                    href={pwaBuilderUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="w-full min-h-[40px] px-3.5 rounded-xl border border-[#FF6B1A]/45 bg-[#FF6B1A]/10 hover:bg-[#FF6B1A]/20 text-[#E05206] dark:text-[#FF8533] font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Buka PWABuilder (Generate .APK)</span>
+                    <span>Buka PWABuilder (Langsung Generate .APK)</span>
                   </a>
+                </div>
+
+                <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/5 p-3 space-y-2.5">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                    <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                    <span>Build .APK Native via GitHub Actions (Bluetooth Classic PIN)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                    Khusus dongle PIN seperti <strong>BRT JUKEN</strong> agar bisa langsung tersambung tanpa Chrome/WebSocket.
+                  </p>
+                  <ol className="text-[11px] text-slate-600 dark:text-slate-400 list-decimal list-inside space-y-1 leading-relaxed">
+                    <li>
+                      Ekspor proyek ini ke <strong>GitHub</strong>, atau unduh paket <code>.zip</code> di bawah lalu ekstrak dan unggah ke repositori GitHub Anda.
+                    </li>
+                    <li>
+                      Di GitHub buka tab <strong>Actions</strong> → pilih <strong>Build SAG65 Android APK</strong> → tekan <strong>Run workflow</strong>.
+                    </li>
+                    <li>
+                      Unduh hasil <strong>SAG65-Juken5-Android-APK</strong> di bagian <strong>Artifacts</strong> lalu instal <code>app-debug.apk</code>.
+                    </li>
+                  </ol>
+                  <button
+                    type="button"
+                    onClick={() => downloadGithubApkKitZip(appUrl)}
+                    className="w-full min-h-[40px] px-3.5 rounded-xl border border-emerald-500/45 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Unduh Paket GitHub APK (.zip)</span>
+                  </button>
                 </div>
               </div>
             )}
