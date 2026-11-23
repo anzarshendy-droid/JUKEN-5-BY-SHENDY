@@ -247,10 +247,18 @@ export function buildAndroidBuildConfigJson(appUrl: string): string {
         launcherName: 'SAG65',
         display: 'standalone',
         orientation: 'any',
-        themeColor: '#0A0D12',
-        backgroundColor: '#0A0D12',
+        themeColor: '#090C10',
+        backgroundColor: '#090C10',
         startUrl: '/',
       },
+      androidPermissions: [
+        'android.permission.ACCESS_FINE_LOCATION',
+        'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.BLUETOOTH',
+        'android.permission.BLUETOOTH_ADMIN',
+        'android.permission.BLUETOOTH_SCAN',
+        'android.permission.BLUETOOTH_CONNECT',
+      ],
       buildApkSteps: [
         '1. Untuk compile menjadi file .apk Android secara gratis tanpa install Android Studio di PC, buka https://www.pwabuilder.com dan masukkan URL: ' +
           appUrl,

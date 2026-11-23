@@ -46,6 +46,15 @@
           "value": "*"
         }
       ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Permissions-Policy",
+          "value": "bluetooth=(self), serial=(self), geolocation=(self), gyroscope=(self), accelerometer=(self), magnetometer=(self)"
+        }
+      ]
     }
   ],
   "rewrites": [

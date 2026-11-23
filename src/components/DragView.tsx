@@ -22,6 +22,8 @@ import {
   saveDragRun,
 } from '../utils/dragTimer';
 import {
+  Compass,
+  Crosshair,
   Download,
   Flag,
   Gauge,
@@ -40,6 +42,17 @@ interface DragViewProps {
 
 type DragPhase = 'idle' | 'countdown' | 'armed' | 'running' | 'finished';
 type DragSource = 'gps' | 'simulator';
+
+interface GyroTelemetry {
+  ozDeg: number; // Yaw / Oz relative heading (-180..+180)
+  pitchDeg: number; // Front lift / dive (-90..+90)
+  rollDeg: number; // Lean left / right (-90..+90)
+  launchG: number; // Longitudinal G-force
+  peakG: number;
+  maxPitchDeg: number;
+  maxOzDriftDeg: number;
+  hasLiveSensor: boolean;
+}
 
 interface LiveSplits {
   elapsedMs: number;
@@ -60,6 +73,9 @@ interface LiveSplits {
   trap402Kmh: number | null;
   peakSpeedKmh: number;
   peakRpm: number;
+  peakLaunchG: number;
+  maxPitchDeg: number;
+  maxOzDriftDeg: number;
 }
 
 const INITIAL_SPLITS: LiveSplits = {
@@ -81,7 +97,27 @@ const INITIAL_SPLITS: LiveSplits = {
   trap402Kmh: null,
   peakSpeedKmh: 0,
   peakRpm: 0,
+  peakLaunchG: 0,
+  maxPitchDeg: 0,
+  maxOzDriftDeg: 0,
 };
+
+const INITIAL_GYRO: GyroTelemetry = {
+  ozDeg: 0,
+  pitchDeg: 0,
+  rollDeg: 0,
+  launchG: 0,
+  peakG: 0,
+  maxPitchDeg: 0,
+  maxOzDriftDeg: 0,
+  hasLiveSensor: false,
+};
+
+function normalizeAngle180(deg: number): number {
+  let d = ((deg + 180) % 360 + 360) % 360 - 180;
+  if (d === -180) d = 180;
+  return d;
+}
 
 export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => {
   const [targetDistance, setTargetDistance] = useState<DragTargetDistance>(201);
@@ -91,12 +127,26 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
   const [litRedLights, setLitRedLights] = useState<number>(0); // 0..5
   const [treeStatusLight, setTreeStatusLight] = useState<'off' | 'red' | 'green' | 'foul'>('off');
   const [splits, setSplits] = useState<LiveSplits>(INITIAL_SPLITS);
+  const [gyro, setGyro] = useState<GyroTelemetry>(INITIAL_GYRO);
+  const [gyroNeedsPermission, setGyroNeedsPermission] = useState<boolean>(false);
+  const [gyroPermissionMsg, setGyroPermissionMsg] = useState<string | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [gpsStatus, setGpsStatus] = useState<string>('Siap kunci sinyal GPS');
   const [runs, setRuns] = useState<DragRunRecord[]>(() => loadDragRuns());
 
   const phaseRef = useRef<DragPhase>('idle');
   const splitsRef = useRef<LiveSplits>(INITIAL_SPLITS);
+  const gyroRef = useRef<GyroTelemetry>(INITIAL_GYRO);
+  const rawOrientRef = useRef<{ alpha: number; beta: number; gamma: number }>({
+    alpha: 0,
+    beta: 0,
+    gamma: 0,
+  });
+  const orientOffsetRef = useRef<{ alpha: number; beta: number; gamma: number }>({
+    alpha: 0,
+    beta: 0,
+    gamma: 0,
+  });
   const startTimeRef = useRef<number>(0);
   const greenLightTimeRef = useRef<number>(0);
   const jumpStartRef = useRef<boolean>(false);
@@ -117,6 +167,133 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
   useEffect(() => {
     latestRpmRef.current = frame.rpm;
   }, [frame.rpm]);
+
+  // Attach hardware Gyroscope / Orientation + Accelerometer (Gyro Oz)
+  const attachGyroListeners = useCallback(() => {
+    if (typeof window === 'undefined') return () => {};
+
+    const onOrientation = (ev: DeviceOrientationEvent) => {
+      if (ev.alpha === null && ev.beta === null && ev.gamma === null) return;
+      const rawA = ev.alpha ?? 0;
+      const rawB = ev.beta ?? 0;
+      const rawG = ev.gamma ?? 0;
+      rawOrientRef.current = { alpha: rawA, beta: rawB, gamma: rawG };
+
+      const ozDeg = Number(normalizeAngle180(rawA - orientOffsetRef.current.alpha).toFixed(1));
+      const pitchDeg = Number(Math.max(-90, Math.min(90, rawB - orientOffsetRef.current.beta)).toFixed(1));
+      const rollDeg = Number(Math.max(-90, Math.min(90, rawG - orientOffsetRef.current.gamma)).toFixed(1));
+
+      const isActiveRun = phaseRef.current === 'running';
+      const nextPeakPitch = isActiveRun
+        ? Math.max(gyroRef.current.maxPitchDeg, Math.abs(pitchDeg))
+        : gyroRef.current.maxPitchDeg;
+      const nextPeakOz = isActiveRun
+        ? Math.max(gyroRef.current.maxOzDriftDeg, Math.abs(ozDeg))
+        : gyroRef.current.maxOzDriftDeg;
+
+      const next: GyroTelemetry = {
+        ...gyroRef.current,
+        ozDeg,
+        pitchDeg,
+        rollDeg,
+        maxPitchDeg: Number(nextPeakPitch.toFixed(1)),
+        maxOzDriftDeg: Number(nextPeakOz.toFixed(1)),
+        hasLiveSensor: true,
+      };
+      gyroRef.current = next;
+      setGyro(next);
+    };
+
+    const onMotion = (ev: DeviceMotionEvent) => {
+      const acc = ev.acceleration || ev.accelerationIncludingGravity;
+      if (!acc) return;
+      const ax = acc.x ?? 0;
+      const ay = acc.y ?? 0;
+      const az = acc.z ?? 0;
+      // Subtract ~9.81 if fallback to accelerationIncludingGravity
+      const netMag = ev.acceleration
+        ? Math.hypot(ax, ay, az)
+        : Math.max(0, Math.hypot(ax, ay, az) - 9.81);
+      const launchG = Number((netMag / 9.81).toFixed(2));
+
+      const isActiveRun = phaseRef.current === 'running';
+      const nextPeakG = isActiveRun
+        ? Math.max(gyroRef.current.peakG, launchG)
+        : gyroRef.current.peakG;
+
+      const next: GyroTelemetry = {
+        ...gyroRef.current,
+        launchG,
+        peakG: Number(nextPeakG.toFixed(2)),
+        hasLiveSensor: true,
+      };
+      gyroRef.current = next;
+      setGyro(next);
+    };
+
+    window.addEventListener('deviceorientation', onOrientation);
+    window.addEventListener('devicemotion', onMotion);
+    return () => {
+      window.removeEventListener('deviceorientation', onOrientation);
+      window.removeEventListener('devicemotion', onMotion);
+    };
+  }, []);
+
+  useEffect(() => {
+    const devOrient = DeviceOrientationEvent as unknown as {
+      requestPermission?: () => Promise<'granted' | 'denied'>;
+    };
+    if (typeof devOrient?.requestPermission === 'function') {
+      setGyroNeedsPermission(true);
+      return;
+    }
+    return attachGyroListeners();
+  }, [attachGyroListeners]);
+
+  const handleRequestGyroPermission = async () => {
+    setGyroPermissionMsg(null);
+    try {
+      const devOrient = DeviceOrientationEvent as unknown as {
+        requestPermission?: () => Promise<'granted' | 'denied'>;
+      };
+      const devMotion = DeviceMotionEvent as unknown as {
+        requestPermission?: () => Promise<'granted' | 'denied'>;
+      };
+      let granted = true;
+      if (typeof devOrient?.requestPermission === 'function') {
+        const res = await devOrient.requestPermission();
+        if (res !== 'granted') granted = false;
+      }
+      if (typeof devMotion?.requestPermission === 'function') {
+        const res = await devMotion.requestPermission();
+        if (res !== 'granted') granted = false;
+      }
+      if (granted) {
+        setGyroNeedsPermission(false);
+        attachGyroListeners();
+        setGyroPermissionMsg('Sensor Gyro Oz aktif.');
+      } else {
+        setGyroPermissionMsg('Izin sensor gerak ditolak di browser.');
+      }
+    } catch {
+      setGyroPermissionMsg('Gagal mengaktifkan sensor gerak pada perangkat ini.');
+    }
+  };
+
+  const handleCalibrateGyro = () => {
+    orientOffsetRef.current = { ...rawOrientRef.current };
+    const reset: GyroTelemetry = {
+      ...gyroRef.current,
+      ozDeg: 0,
+      pitchDeg: 0,
+      rollDeg: 0,
+      peakG: 0,
+      maxPitchDeg: 0,
+      maxOzDriftDeg: 0,
+    };
+    gyroRef.current = reset;
+    setGyro(reset);
+  };
 
   const stopAllTimers = useCallback(() => {
     if (watchIdRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
@@ -150,28 +327,38 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
       stopAllTimers();
       phaseRef.current = 'finished';
       setPhase('finished');
-      setSplits(finalSplits);
+
+      const mergedSplits: LiveSplits = {
+        ...finalSplits,
+        peakLaunchG: Number(Math.max(finalSplits.peakLaunchG, gyroRef.current.peakG).toFixed(2)),
+        maxPitchDeg: Number(Math.max(finalSplits.maxPitchDeg, gyroRef.current.maxPitchDeg).toFixed(1)),
+        maxOzDriftDeg: Number(Math.max(finalSplits.maxOzDriftDeg, gyroRef.current.maxOzDriftDeg).toFixed(1)),
+      };
+      setSplits(mergedSplits);
 
       const record: DragRunRecord = {
         id: `drag-${Date.now()}`,
         createdAt: Date.now(),
         source: src,
         targetDistance: target,
-        isJumpStart: finalSplits.isJumpStart,
-        reactionTimeMs: finalSplits.reactionTimeMs,
-        time30ftMs: finalSplits.time30ftMs,
-        time60ftMs: finalSplits.time60ftMs,
-        time330ftMs: finalSplits.time330ftMs,
-        time0to60Ms: finalSplits.time0to60Ms,
-        time0to100Ms: finalSplits.time0to100Ms,
-        time201mMs: finalSplits.time201mMs,
-        trap201Kmh: finalSplits.trap201Kmh,
-        time1000ftMs: finalSplits.time1000ftMs,
-        time402mMs: finalSplits.time402mMs,
-        trap402Kmh: finalSplits.trap402Kmh,
-        peakSpeedKmh: Number(finalSplits.peakSpeedKmh.toFixed(1)),
-        peakRpm: Math.round(finalSplits.peakRpm),
-        gpsAccuracyM: finalSplits.accuracyM,
+        isJumpStart: mergedSplits.isJumpStart,
+        reactionTimeMs: mergedSplits.reactionTimeMs,
+        time30ftMs: mergedSplits.time30ftMs,
+        time60ftMs: mergedSplits.time60ftMs,
+        time330ftMs: mergedSplits.time330ftMs,
+        time0to60Ms: mergedSplits.time0to60Ms,
+        time0to100Ms: mergedSplits.time0to100Ms,
+        time201mMs: mergedSplits.time201mMs,
+        trap201Kmh: mergedSplits.trap201Kmh,
+        time1000ftMs: mergedSplits.time1000ftMs,
+        time402mMs: mergedSplits.time402mMs,
+        trap402Kmh: mergedSplits.trap402Kmh,
+        peakSpeedKmh: Number(mergedSplits.peakSpeedKmh.toFixed(1)),
+        peakRpm: Math.round(mergedSplits.peakRpm),
+        gpsAccuracyM: mergedSplits.accuracyM,
+        peakLaunchG: mergedSplits.peakLaunchG,
+        maxPitchDeg: mergedSplits.maxPitchDeg,
+        maxOzDriftDeg: mergedSplits.maxOzDriftDeg,
       };
       const updated = saveDragRun(record);
       setRuns(updated);
@@ -194,6 +381,17 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           phaseRef.current = 'running';
           setPhase('running');
           startTimeRef.current = sampleEpochMs;
+          // Zero Oz heading at start line for clean run drift tracking
+          orientOffsetRef.current.alpha = rawOrientRef.current.alpha;
+          gyroRef.current = {
+            ...gyroRef.current,
+            ozDeg: 0,
+            peakG: gyroRef.current.launchG,
+            maxPitchDeg: Math.abs(gyroRef.current.pitchDeg),
+            maxOzDriftDeg: 0,
+          };
+          setGyro(gyroRef.current);
+
           const rt =
             greenLightTimeRef.current > 0
               ? Math.max(0, sampleEpochMs - greenLightTimeRef.current)
@@ -238,8 +436,10 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
       cur.accuracyM = accuracyM;
       cur.peakSpeedKmh = Math.max(cur.peakSpeedKmh, nextSpeedKmh);
       cur.peakRpm = Math.max(cur.peakRpm, latestRpmRef.current);
+      cur.peakLaunchG = Math.max(cur.peakLaunchG, gyroRef.current.peakG);
+      cur.maxPitchDeg = Math.max(cur.maxPitchDeg, gyroRef.current.maxPitchDeg);
+      cur.maxOzDriftDeg = Math.max(cur.maxOzDriftDeg, gyroRef.current.maxOzDriftDeg);
 
-      // 0 - 60 km/h
       if (cur.time0to60Ms === null && nextSpeedKmh >= 60) {
         const hit = interpolateCrossing(
           prev.speedKmh,
@@ -253,7 +453,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.time0to60Ms = hit.timeMs;
       }
 
-      // 0 - 100 km/h
       if (cur.time0to100Ms === null && nextSpeedKmh >= 100) {
         const hit = interpolateCrossing(
           prev.speedKmh,
@@ -267,7 +466,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.time0to100Ms = hit.timeMs;
       }
 
-      // 30 ft (9.144 m)
       if (cur.time30ftMs === null && nextDistM >= DIST_30FT_M) {
         const hit = interpolateCrossing(
           prev.distanceM,
@@ -281,7 +479,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.time30ftMs = hit.timeMs;
       }
 
-      // 60 ft (18.288 m)
       if (cur.time60ftMs === null && nextDistM >= DIST_60FT_M) {
         const hit = interpolateCrossing(
           prev.distanceM,
@@ -295,7 +492,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.time60ftMs = hit.timeMs;
       }
 
-      // 330 ft (100.584 m)
       if (cur.time330ftMs === null && nextDistM >= DIST_330FT_M) {
         const hit = interpolateCrossing(
           prev.distanceM,
@@ -309,7 +505,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.time330ftMs = hit.timeMs;
       }
 
-      // 201 m (660 ft / 1/8 mile)
       if (cur.time201mMs === null && nextDistM >= DIST_201M) {
         const hit = interpolateCrossing(
           prev.distanceM,
@@ -324,7 +519,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.trap201Kmh = hit.speedKmh;
       }
 
-      // 1000 ft (304.8 m)
       if (cur.time1000ftMs === null && nextDistM >= DIST_1000FT_M) {
         const hit = interpolateCrossing(
           prev.distanceM,
@@ -338,7 +532,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         cur.time1000ftMs = hit.timeMs;
       }
 
-      // 402 m (1320 ft / 1/4 mile)
       if (cur.time402mMs === null && nextDistM >= DIST_402M) {
         const hit = interpolateCrossing(
           prev.distanceM,
@@ -381,6 +574,15 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
       setSplits(splitsRef.current);
       prevSampleRef.current = null;
       greenLightTimeRef.current = withReactionLight ? Date.now() : 0;
+
+      // Reset run peaks for Gyro Oz
+      gyroRef.current = {
+        ...gyroRef.current,
+        peakG: 0,
+        maxPitchDeg: 0,
+        maxOzDriftDeg: 0,
+      };
+      setGyro(gyroRef.current);
 
       if (src === 'gps') {
         if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -468,7 +670,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           }
         );
       } else {
-        // Realistic 20Hz Drag Motorcycle Physics Simulator
+        // Realistic 20Hz Drag Motorcycle Physics Simulator + Simulated Gyro Oz
         phaseRef.current = 'running';
         setPhase('running');
         startTimeRef.current = Date.now();
@@ -479,7 +681,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           isJumpStart: false,
           reactionTimeMs: reactionMs,
         };
-        setGpsStatus('Simulasi Drag GPS 20 Hz berjalan...');
+        setGpsStatus('Simulasi Drag GPS & Gyro Oz 20 Hz berjalan...');
 
         let simDistM = 0;
         let simSpeedMs = 0;
@@ -490,13 +692,33 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           const now = Date.now();
           const elapsedSec = (now - startTimeRef.current) / 1000;
           const dragDecay = Math.max(1.8, peakAccel - simSpeedMs * 0.13);
-          simSpeedMs = Math.min(44.5, simSpeedMs + dragDecay * dt);
+          const nextSpeedMs = Math.min(44.5, simSpeedMs + dragDecay * dt);
+          const actualAccel = (nextSpeedMs - simSpeedMs) / dt;
+          simSpeedMs = nextSpeedMs;
           simDistM += simSpeedMs * dt;
           const speedKmh = simSpeedMs * 3.6;
 
           if (connectionMode === 'disconnected') {
             latestRpmRef.current = Math.min(12600, 4800 + ((simSpeedMs * 240) % 7600));
           }
+
+          // Update synthetic Gyro Oz readings during simulation
+          const simG = Number(Math.max(0.05, actualAccel / 9.81).toFixed(2));
+          const simPitch = Number((simG * 8.2 + Math.sin(elapsedSec * 5) * 0.6).toFixed(1));
+          const simRoll = Number((Math.sin(elapsedSec * 2.4) * 1.4).toFixed(1));
+          const simOz = Number((Math.sin(elapsedSec * 1.7) * 1.1).toFixed(1));
+          const simGyro: GyroTelemetry = {
+            ozDeg: simOz,
+            pitchDeg: simPitch,
+            rollDeg: simRoll,
+            launchG: simG,
+            peakG: Number(Math.max(gyroRef.current.peakG, simG).toFixed(2)),
+            maxPitchDeg: Number(Math.max(gyroRef.current.maxPitchDeg, Math.abs(simPitch)).toFixed(1)),
+            maxOzDriftDeg: Number(Math.max(gyroRef.current.maxOzDriftDeg, Math.abs(simOz)).toFixed(1)),
+            hasLiveSensor: true,
+          };
+          gyroRef.current = simGyro;
+          setGyro(simGyro);
 
           processMotionSample(simDistM, speedKmh, 2.5, now, 'simulator', target);
           if (elapsedSec > 25) {
@@ -520,7 +742,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
       setTreeStatusLight('red');
       setSplits(INITIAL_SPLITS);
 
-      // Watch GPS during countdown in GPS mode to catch jump-starts (FOUL RED LIGHT)
       if (sourceMode === 'gps' && typeof navigator !== 'undefined' && navigator.geolocation) {
         let stageCoord: { lat: number; lon: number } | null = null;
         watchIdRef.current = navigator.geolocation.watchPosition(
@@ -539,7 +760,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
             }
           },
           () => {
-            // ignore pre-stage GPS errors here; main tracker reports if needed
+            // ignore pre-stage GPS errors here
           },
           { enableHighAccuracy: true, maximumAge: 0 }
         );
@@ -556,7 +777,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
             clearInterval(countdownTimerRef.current);
             countdownTimerRef.current = null;
           }
-          // Short realistic hold after all 5 red lights are lit, then switch to GREEN (GO!)
           const holdDelay = 650 + Math.round(Math.random() * 250);
           greenDelayTimerRef.current = window.setTimeout(() => {
             setLitRedLights(0);
@@ -616,6 +836,10 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
 
   const progressPct = Math.min(100, (splits.distanceM / targetDistance) * 100);
 
+  // Map Roll/Pitch onto the circular Gyro Oz crosshair (radius 40 inside 120x120 viewBox)
+  const dotX = 60 + Math.max(-36, Math.min(36, gyro.rollDeg * 1.2));
+  const dotY = 60 - Math.max(-36, Math.min(36, gyro.pitchDeg * 1.6));
+
   return (
     <div className="space-y-4">
       {/* Control & Target Distance Header */}
@@ -624,10 +848,10 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
           <div className="space-y-1">
             <h2 className="text-base sm:text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Flag className="w-5 h-5 text-[#FF6B1A]" />
-              <span>Mode Drag Timer GPS (201 m &amp; 402 m)</span>
+              <span>Mode Drag Timer GPS &amp; Gyro Oz (201 m &amp; 402 m)</span>
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-              Lampu start 5 titik Merah &amp; Hijau dengan data jarak bertahap 30 ft, 60 ft, 330 ft, 201 m, 1000 ft, hingga 402 m.
+              Lampu start 5 titik Merah &amp; Hijau, jarak 30 ft – 402 m, dan sensor Gyro Oz (Yaw, Pitch, Roll, Launch G).
             </p>
           </div>
 
@@ -783,7 +1007,6 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
             })}
           </div>
 
-          {/* Merah (Tahan/Foul) & Hijau (GO) Dual Signal */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <div
@@ -821,95 +1044,222 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
         </div>
       )}
 
-      {/* Primary Live Chronometer & Distance Cockpit */}
+      {/* Primary Live Chronometer, Gyro Oz & Distance Cockpit */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-5 space-y-4">
-          <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 gap-2">
-            <span className="font-medium truncate">
-              {phase === 'countdown'
-                ? `HITUNG MUNDUR LAMPU MERAH (${litRedLights}/5)`
-                : phase === 'armed'
-                ? 'HIJAU (GO!) · Menunggu Gerakan'
-                : phase === 'running'
-                ? `SEDANG BERLARI · Target ${targetDistance} m`
-                : phase === 'finished'
-                ? `FINISH ${targetDistance} m${splits.isJumpStart ? ' (FOUL)' : ''}`
-                : gpsStatus}
-            </span>
-            <span className="font-mono tabular-nums shrink-0">
-              {sourceMode === 'gps'
-                ? `GPS ${splits.accuracyM !== null ? `±${splits.accuracyM} m` : 'Siap'}`
-                : 'Simulasi 20 Hz'}
-              {' · '}
-              {connectionMode !== 'disconnected'
-                ? `ECU ${Math.round(frame.rpm).toLocaleString('id-ID')} RPM`
-                : 'ECU Standby'}
-            </span>
-          </div>
+        <div className="lg:col-span-2 space-y-4">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-5 space-y-4">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 gap-2">
+              <span className="font-medium truncate">
+                {phase === 'countdown'
+                  ? `HITUNG MUNDUR LAMPU MERAH (${litRedLights}/5)`
+                  : phase === 'armed'
+                  ? 'HIJAU (GO!) · Menunggu Gerakan'
+                  : phase === 'running'
+                  ? `SEDANG BERLARI · Target ${targetDistance} m`
+                  : phase === 'finished'
+                  ? `FINISH ${targetDistance} m${splits.isJumpStart ? ' (FOUL)' : ''}`
+                  : gpsStatus}
+              </span>
+              <span className="font-mono tabular-nums shrink-0">
+                {sourceMode === 'gps'
+                  ? `GPS ${splits.accuracyM !== null ? `±${splits.accuracyM} m` : 'Siap'}`
+                  : 'Simulasi 20 Hz'}
+                {' · '}
+                {connectionMode !== 'disconnected'
+                  ? `ECU ${Math.round(frame.rpm).toLocaleString('id-ID')} RPM`
+                  : 'ECU Standby'}
+              </span>
+            </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-end">
-            <div className="col-span-2 sm:col-span-1">
-              <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Waktu Berjalan (ET)
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-end">
+              <div className="col-span-2 sm:col-span-1">
+                <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Waktu Berjalan (ET)
+                </div>
+                <div className="font-mono tabular-nums text-4xl sm:text-5xl font-bold text-[#FF6B1A] leading-none mt-1">
+                  {(splits.elapsedMs / 1000).toFixed(2)}
+                  <span className="text-lg font-medium text-slate-500 dark:text-slate-400 ml-1">s</span>
+                </div>
               </div>
-              <div className="font-mono tabular-nums text-4xl sm:text-5xl font-bold text-[#FF6B1A] leading-none mt-1">
-                {(splits.elapsedMs / 1000).toFixed(2)}
-                <span className="text-lg font-medium text-slate-500 dark:text-slate-400 ml-1">s</span>
+
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Kecepatan GPS
+                </div>
+                <div className="font-mono tabular-nums text-3xl sm:text-4xl font-bold text-slate-900 dark:text-slate-100 leading-none mt-1">
+                  {splits.speedKmh.toFixed(1)}
+                  <span className="text-sm font-medium text-slate-500 dark:text-slate-400 ml-1">km/h</span>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Jarak Tempuh
+                </div>
+                <div className="font-mono tabular-nums text-3xl sm:text-4xl font-bold text-slate-900 dark:text-slate-100 leading-none mt-1">
+                  {Math.min(targetDistance, splits.distanceM).toFixed(1)}
+                  <span className="text-sm font-medium text-slate-500 dark:text-slate-400 ml-1">
+                    / {targetDistance} m
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Kecepatan GPS
-              </div>
-              <div className="font-mono tabular-nums text-3xl sm:text-4xl font-bold text-slate-900 dark:text-slate-100 leading-none mt-1">
-                {splits.speedKmh.toFixed(1)}
-                <span className="text-sm font-medium text-slate-500 dark:text-slate-400 ml-1">km/h</span>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Jarak Tempuh
-              </div>
-              <div className="font-mono tabular-nums text-3xl sm:text-4xl font-bold text-slate-900 dark:text-slate-100 leading-none mt-1">
-                {Math.min(targetDistance, splits.distanceM).toFixed(1)}
-                <span className="text-sm font-medium text-slate-500 dark:text-slate-400 ml-1">
-                  / {targetDistance} m
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Track Progress Bar with Sequential Markers */}
-          <div className="space-y-1.5 pt-1">
-            <div className="relative h-3.5 w-full rounded-full bg-slate-100 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 overflow-hidden">
-              <div
-                className="h-full bg-[#FF6B1A] transition-all duration-75"
-                style={{ width: `${progressPct}%` }}
-              />
-              {targetDistance === 402 && (
+            {/* Track Progress Bar with Sequential Markers */}
+            <div className="space-y-1.5 pt-1">
+              <div className="relative h-3.5 w-full rounded-full bg-slate-100 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 overflow-hidden">
                 <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-emerald-400"
-                  style={{ left: '50%' }}
-                  title="Garis 201 m"
+                  className="h-full bg-[#FF6B1A] transition-all duration-75"
+                  style={{ width: `${progressPct}%` }}
                 />
-              )}
+                {targetDistance === 402 && (
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-emerald-400"
+                    style={{ left: '50%' }}
+                    title="Garis 201 m"
+                  />
+                )}
+              </div>
+              <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                <span>0 m</span>
+                <span>30 ft</span>
+                <span>60 ft</span>
+                <span>330 ft</span>
+                {targetDistance === 402 ? (
+                  <>
+                    <span className="text-emerald-600 dark:text-emerald-400">201 m</span>
+                    <span>1000 ft</span>
+                    <span>402 m</span>
+                  </>
+                ) : (
+                  <span className="text-[#FF6B1A] font-semibold">201 m</span>
+                )}
+              </div>
             </div>
-            <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              <span>0 m</span>
-              <span>30 ft</span>
-              <span>60 ft</span>
-              <span>330 ft</span>
-              {targetDistance === 402 ? (
-                <>
-                  <span className="text-emerald-600 dark:text-emerald-400">201 m</span>
-                  <span>1000 ft</span>
-                  <span>402 m</span>
-                </>
-              ) : (
-                <span className="text-[#FF6B1A] font-semibold">201 m</span>
-              )}
+          </div>
+
+          {/* Gyro Oz Attitude, Pitch, Roll & Launch G Card */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#121721] p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-[#FF6B1A]" />
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  Sensor Gyro Oz (Yaw / Pitch / Roll / Launch G)
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {gyroNeedsPermission && (
+                  <button
+                    type="button"
+                    onClick={handleRequestGyroPermission}
+                    className="min-h-[34px] px-3 rounded-lg bg-[#FF6B1A] hover:bg-[#F97316] text-slate-950 text-xs font-semibold"
+                  >
+                    Aktifkan Gyro Oz
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCalibrateGyro}
+                  className="min-h-[34px] px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-medium text-slate-800 dark:text-slate-200 flex items-center gap-1.5"
+                >
+                  <Crosshair className="w-3.5 h-3.5 text-[#FF6B1A]" />
+                  <span>Kalibrasi 0°</span>
+                </button>
+              </div>
+            </div>
+
+            {gyroPermissionMsg && (
+              <div className="text-xs text-amber-600 dark:text-amber-300">{gyroPermissionMsg}</div>
+            )}
+
+            <div className="flex flex-col sm:flex-row items-center gap-4">
+              {/* Circular Gyro Oz & G-Force Crosshair */}
+              <div className="shrink-0">
+                <svg
+                  viewBox="0 0 120 120"
+                  className="w-28 h-28"
+                  aria-label="Indikator Gyro Oz"
+                >
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="52"
+                    className="fill-slate-50 dark:fill-[#0B0E14] stroke-slate-200 dark:stroke-slate-700"
+                    strokeWidth="2"
+                  />
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="30"
+                    fill="none"
+                    className="stroke-slate-200 dark:stroke-slate-800"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                  />
+                  <line
+                    x1="12"
+                    y1="60"
+                    x2="108"
+                    y2="60"
+                    className="stroke-slate-200 dark:stroke-slate-800"
+                    strokeWidth="1"
+                  />
+                  <line
+                    x1="60"
+                    y1="12"
+                    x2="60"
+                    y2="108"
+                    className="stroke-slate-200 dark:stroke-slate-800"
+                    strokeWidth="1"
+                  />
+                  {/* Oz Yaw Direction Needle */}
+                  <g transform={`rotate(${gyro.ozDeg} 60 60)`}>
+                    <polygon points="60,8 56,16 64,16" fill="#10B981" />
+                  </g>
+                  {/* Pitch/Roll Attitude Dot */}
+                  <circle cx={dotX} cy={dotY} r="6.5" fill="#FF6B1A" />
+                </svg>
+              </div>
+
+              <div className="flex-1 w-full grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs font-mono">
+                <div className="rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 p-2.5">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Oz (Yaw)</div>
+                  <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    {gyro.ozDeg > 0 ? `+${gyro.ozDeg.toFixed(1)}` : gyro.ozDeg.toFixed(1)}°
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 p-2.5">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Pitch (Angkat)</div>
+                  <div className="text-base font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                    {gyro.pitchDeg > 0 ? `+${gyro.pitchDeg.toFixed(1)}` : gyro.pitchDeg.toFixed(1)}°
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 p-2.5">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Roll (Miring)</div>
+                  <div className="text-base font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                    {gyro.rollDeg > 0 ? `+${gyro.rollDeg.toFixed(1)}` : gyro.rollDeg.toFixed(1)}°
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 p-2.5">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Launch G</div>
+                  <div className="text-base font-bold text-[#FF6B1A] mt-0.5">
+                    {gyro.launchG.toFixed(2)} G
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 p-2.5">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Peak G</div>
+                  <div className="text-base font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                    {gyro.peakG.toFixed(2)} G
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-[#0B0E14] border border-slate-200 dark:border-slate-800 p-2.5">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Max Pitch</div>
+                  <div className="text-base font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                    {gyro.maxPitchDeg.toFixed(1)}°
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -981,6 +1331,12 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
                 {formatDragSeconds(splits.time0to60Ms)} / {formatDragSeconds(splits.time0to100Ms)}
               </span>
             </div>
+            <div className="py-1.5 flex items-center justify-between">
+              <span className="text-slate-500 dark:text-slate-400">Peak G / Max Pitch</span>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {gyro.peakG.toFixed(2)} G · {gyro.maxPitchDeg.toFixed(1)}°
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -1030,7 +1386,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
               Riwayat Catatan Waktu Drag ({runs.length})
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Data jarak 30 ft, 60 ft, 330 ft, 201 m, 1000 ft, dan 402 m tersimpan otomatis.
+              Data jarak 30 ft – 402 m beserta puncak G-Force &amp; sudut Gyro Oz tersimpan otomatis.
             </p>
           </div>
           {runs.length > 0 && (
@@ -1072,7 +1428,7 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
                   <th className="py-2 px-2 font-medium text-[#FF6B1A]">201 m</th>
                   <th className="py-2 px-2 font-medium">1000 ft</th>
                   <th className="py-2 px-2 font-medium text-emerald-600 dark:text-emerald-400">402 m</th>
-                  <th className="py-2 px-2 font-medium">Top km/h</th>
+                  <th className="py-2 px-2 font-medium">Peak G</th>
                   <th className="py-2 pl-2 text-right font-medium">Aksi</th>
                 </tr>
               </thead>
@@ -1103,7 +1459,11 @@ export const DragView: React.FC<DragViewProps> = ({ frame, connectionMode }) => 
                       {formatDragSeconds(r.time402mMs)}
                       {r.trap402Kmh !== null ? ` (${r.trap402Kmh.toFixed(0)})` : ''}
                     </td>
-                    <td className="py-2.5 px-2 whitespace-nowrap">{r.peakSpeedKmh.toFixed(1)}</td>
+                    <td className="py-2.5 px-2 whitespace-nowrap">
+                      {r.peakLaunchG !== undefined && r.peakLaunchG !== null
+                        ? `${r.peakLaunchG.toFixed(2)} G`
+                        : `${r.peakSpeedKmh.toFixed(0)} km/h`}
+                    </td>
                     <td className="py-2.5 pl-2 text-right">
                       <button
                         type="button"

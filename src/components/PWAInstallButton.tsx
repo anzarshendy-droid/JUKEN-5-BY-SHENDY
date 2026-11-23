@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useOnlineStatus, usePWAInstall } from '../hooks/usePWA';
 import { buildWindowsLauncherBat } from '../utils/googleDrive';
-import { Check, Copy, Download, Monitor, Smartphone, WifiOff } from 'lucide-react';
+import { Check, Copy, Download, ExternalLink, Monitor, Smartphone, WifiOff } from 'lucide-react';
 
 export const PWAInstallButton: React.FC = () => {
   const { isInstallable, isInstalled, isIOS, isWindows, install } = usePWAInstall();
@@ -215,18 +215,14 @@ export const PWAInstallButton: React.FC = () => {
                   </ol>
                 )}
 
-                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0E14] p-3 space-y-2">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0E14] p-3 space-y-2.5">
                   <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                    Data Identitas untuk Build .APK (PWABuilder)
+                    Buat File .APK Android (PWABuilder / GitHub APK)
                   </div>
                   <div className="space-y-1.5 text-xs font-mono">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-slate-500 dark:text-slate-400">App Name:</span>
                       <span className="text-slate-900 dark:text-slate-100">SAG65 Juken 5+</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-500 dark:text-slate-400">Short Name:</span>
-                      <span className="text-slate-900 dark:text-slate-100">SAG65</span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-slate-500 dark:text-slate-400">Package ID:</span>
@@ -244,6 +240,18 @@ export const PWAInstallButton: React.FC = () => {
                       </button>
                     </div>
                   </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                    Untuk <strong>.APK standar</strong> (Drag GPS + Gyro Oz + BLE), tempel URL di atas ke PWABuilder. Untuk <strong>.APK dengan Bluetooth Classic PIN (BRT JUKEN)</strong>, gunakan folder proyek <code>android-apk-bridge</code> &amp; workflow GitHub Actions yang sudah tersedia.
+                  </p>
+                  <a
+                    href="https://www.pwabuilder.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full min-h-[40px] px-3.5 rounded-xl border border-[#FF6B1A]/45 bg-[#FF6B1A]/10 hover:bg-[#FF6B1A]/20 text-[#E05206] dark:text-[#FF8533] font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Buka PWABuilder (Generate .APK)</span>
+                  </a>
                 </div>
               </div>
             )}

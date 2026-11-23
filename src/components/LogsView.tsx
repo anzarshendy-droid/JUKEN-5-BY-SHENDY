@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { LogSession } from '../types/telemetry';
 import { exportSessionToCSV, triggerFileDownload } from '../utils/logStorage';
 import { GoogleDrivePanel } from './GoogleDrivePanel';
-import { BarChart3, Download, FileUp, Search, Trash2 } from 'lucide-react';
+import { BarChart3, ClipboardPaste, Download, FileUp, Search, Trash2 } from 'lucide-react';
 
 interface LogsViewProps {
   sessions: LogSession[];
@@ -25,6 +25,9 @@ export const LogsView: React.FC<LogsViewProps> = ({
   >('all');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [showPasteBox, setShowPasteBox] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteName, setPasteName] = useState('Log Bluetooth HC-05');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = useMemo(() => {
@@ -80,6 +83,21 @@ export const LogsView: React.FC<LogsViewProps> = ({
     }
   };
 
+  const handleImportPasted = async () => {
+    if (!pasteText.trim()) {
+      setImportError('Tempel terlebih dahulu teks atau HEX log dari aplikasi Bluetooth HC-05.');
+      return;
+    }
+    setImportError(null);
+    try {
+      await onImportFromDrive(pasteName.trim() || 'Log Bluetooth HC-05', pasteText);
+      setPasteText('');
+      setShowPasteBox(false);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Gagal memproses log HC-05.');
+    }
+  };
+
   return (
     <div className="space-y-4">
       <GoogleDrivePanel
@@ -96,28 +114,83 @@ export const LogsView: React.FC<LogsViewProps> = ({
               Riwayat Data Logging ECU
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Tersimpan lokal di perangkat Anda. Ekspor ke CSV untuk analisis lanjutan atau buka langsung di grafik.
+              Mendukung impor file (.txt, .log, .csv, .json) atau tempel teks/HEX langsung dari aplikasi Bluetooth HC-05 di HP.
             </p>
           </div>
 
-          <div className="shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.json"
+              accept=".csv,.json,.txt,.log"
               onChange={handleFileChange}
               className="hidden"
             />
+            <button
+              type="button"
+              onClick={() => setShowPasteBox((v) => !v)}
+              className={`min-h-[44px] px-4 py-2 rounded-xl border text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap ${
+                showPasteBox
+                  ? 'border-[#FF6B1A] bg-[#FF6B1A]/15 text-[#E05206] dark:text-[#FF8533]'
+                  : 'border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100'
+              }`}
+            >
+              <ClipboardPaste className="w-4 h-4 text-[#FF6B1A]" />
+              <span>Tempel Log HC-05</span>
+            </button>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-sm font-medium text-slate-800 dark:text-slate-100 flex items-center gap-2 transition-colors whitespace-nowrap"
             >
               <FileUp className="w-4 h-4 text-[#FF6B1A]" />
-              <span>Impor CSV / JSON</span>
+              <span>Impor File</span>
             </button>
           </div>
         </div>
+
+        {showPasteBox && (
+          <div className="rounded-xl border border-[#FF6B1A]/35 bg-slate-50 dark:bg-[#0B0E14] p-3.5 space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                Tempel Log dari Aplikasi Bluetooth HC-05 HP Android
+              </div>
+              <input
+                type="text"
+                value={pasteName}
+                onChange={(e) => setPasteName(e.target.value)}
+                placeholder="Nama sesi log..."
+                className="min-h-[36px] px-3 rounded-lg bg-white dark:bg-[#121721] border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#FF6B1A]"
+              />
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400">
+              Salin log dari aplikasi HC-05 (format HEX <code>AA 55 ...</code>, Key-Value <code>RPM:8500 AFR:12.8 TPS:85</code>, atau CSV) lalu tempel di sini untuk dianalisis grafiknya.
+            </p>
+            <textarea
+              rows={4}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              placeholder={'AA 55 21 34 80 B2 62 78 4A 8D 3A 02 E8 6E\natau:\nRPM:8500 AFR:12.8 TPS:88.5 MAP:98 ECT:84'}
+              className="w-full p-3 rounded-xl bg-white dark:bg-[#121721] border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#FF6B1A]"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowPasteBox(false)}
+                className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={handleImportPasted}
+                className="min-h-[38px] px-4 py-1.5 rounded-lg bg-[#FF6B1A] hover:bg-[#F97316] text-slate-950 text-xs font-semibold"
+              >
+                Proses &amp; Buka Grafik
+              </button>
+            </div>
+          </div>
+        )}
 
         {importError && (
           <div className="rounded-xl border border-red-500/40 bg-red-50 dark:bg-red-950/20 px-3 py-2 text-xs text-red-700 dark:text-red-300">

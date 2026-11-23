@@ -18,7 +18,9 @@ import {
   DEFAULT_BLE_CONFIG,
   EngineSimulator,
   JukenBluetoothClient,
+  JukenNativeAndroidClient,
   JukenSerialClient,
+  JukenWebSocketClient,
 } from './utils/jukenProtocol';
 import {
   deleteSession,
@@ -159,6 +161,15 @@ export default function App() {
   if (!serialClientRef.current) {
     serialClientRef.current = new JukenSerialClient();
   }
+  const wsClientRef = useRef<JukenWebSocketClient | null>(null);
+  if (!wsClientRef.current) {
+    wsClientRef.current = new JukenWebSocketClient();
+  }
+  const nativeClientRef = useRef<JukenNativeAndroidClient | null>(null);
+  if (!nativeClientRef.current) {
+    nativeClientRef.current = new JukenNativeAndroidClient();
+  }
+  const isNativeConnectedRef = useRef(false);
   const simulatorRef = useRef<EngineSimulator | null>(null);
   if (!simulatorRef.current) {
     simulatorRef.current = new EngineSimulator();
@@ -268,9 +279,14 @@ export default function App() {
         onDisconnect: (reason) => {
           setConnectionMode('disconnected');
           setDeviceName(null);
-          if (reason) setBleError(reason);
+          if (reason) {
+            setBleError(reason);
+            showToast(reason);
+          }
         },
       });
+      setHistory([]);
+      isNativeConnectedRef.current = false;
       setConnectionMode('bluetooth');
       setDeviceName(res.deviceName);
       setActiveTab('dashboard');
@@ -281,6 +297,8 @@ export default function App() {
       // Ignore silent user cancel from browser chooser
       if (!/cancel|User cancelled/i.test(msg)) {
         setBleError(msg);
+        showToast(msg);
+        setActiveTab('connection');
       }
     }
   };
@@ -299,6 +317,7 @@ export default function App() {
           if (reason) setBleError(reason);
         },
       });
+      setHistory([]);
       setConnectionMode('serial');
       setDeviceName(res.portLabel);
       setActiveTab('dashboard');
@@ -312,14 +331,99 @@ export default function App() {
     }
   };
 
+  const handleConnectWebSocket = async () => {
+    setBleError(null);
+    const client = wsClientRef.current!;
+    try {
+      const res = await client.connect(bleConfig, {
+        onFrame: (f) => handleIncomingFrame(f),
+        onRawPacket: (log) =>
+          setRawLogs((prev) => [log, ...prev].slice(0, 80)),
+        onDisconnect: (reason) => {
+          setConnectionMode('disconnected');
+          setDeviceName(null);
+          if (reason) {
+            setBleError(reason);
+            showToast(reason);
+          }
+        },
+      });
+      setHistory([]);
+      setConnectionMode('websocket');
+      setDeviceName(res.bridgeLabel);
+      setActiveTab('dashboard');
+      showToast(`Live Bridge tersambung: ${res.bridgeLabel}`);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Gagal terhubung ke Live Bridge WebSocket.';
+      setBleError(msg);
+      showToast(msg);
+    }
+  };
+
+  const handleConnectNativeClassic = async (address: string, name: string) => {
+    setBleError(null);
+    const client = nativeClientRef.current!;
+    try {
+      const res = await client.connect(address, name, bleConfig, {
+        onFrame: (f) => handleIncomingFrame(f),
+        onRawPacket: (log) =>
+          setRawLogs((prev) => [log, ...prev].slice(0, 80)),
+        onDisconnect: (reason) => {
+          isNativeConnectedRef.current = false;
+          setConnectionMode('disconnected');
+          setDeviceName(null);
+          if (reason) {
+            setBleError(reason);
+            showToast(reason);
+          }
+        },
+      });
+      setHistory([]);
+      isNativeConnectedRef.current = true;
+      setConnectionMode('bluetooth');
+      setDeviceName(res.deviceName);
+      setActiveTab('dashboard');
+      showToast(`Terhubung ke ${res.deviceName} (APK Classic)`);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Gagal menyambung via Bluetooth Classic APK.';
+      setBleError(msg);
+      showToast(msg);
+    }
+  };
+
+  const handleSendTestCommand = async (input: string, isHex: boolean) => {
+    if (connectionMode === 'bluetooth') {
+      if (isNativeConnectedRef.current) {
+        await nativeClientRef.current?.sendCommand(input, isHex);
+      } else {
+        await bleClientRef.current?.sendCommand(input, isHex);
+      }
+    } else if (connectionMode === 'serial') {
+      await serialClientRef.current?.sendCommand(input, isHex);
+    } else if (connectionMode === 'websocket') {
+      await wsClientRef.current?.sendCommand(input, isHex);
+    } else {
+      throw new Error('Hubungkan Bluetooth / USB COM / Bridge terlebih dahulu.');
+    }
+  };
+
   const handleDisconnect = async () => {
     if (isRecording) {
       await handleStopAndSaveRecording();
     }
     if (connectionMode === 'bluetooth') {
-      await bleClientRef.current?.disconnect();
+      if (isNativeConnectedRef.current) {
+        await nativeClientRef.current?.disconnect();
+        isNativeConnectedRef.current = false;
+      } else {
+        await bleClientRef.current?.disconnect();
+      }
     } else if (connectionMode === 'serial') {
       await serialClientRef.current?.disconnect();
+    } else if (connectionMode === 'websocket') {
+      await wsClientRef.current?.disconnect();
     }
     setConnectionMode('disconnected');
     setDeviceName(null);
@@ -359,6 +463,8 @@ export default function App() {
           ? `Log Juken 5+ (${labelTime})`
           : connectionMode === 'serial'
           ? `Log USB Windows (${labelTime})`
+          : connectionMode === 'websocket'
+          ? `Log Live Bridge (${labelTime})`
           : `Log Simulasi ${simulatorScenario.toUpperCase()} (${labelTime})`,
       createdAt: Date.now(),
       durationMs,
@@ -366,7 +472,7 @@ export default function App() {
       source:
         connectionMode === 'bluetooth'
           ? 'bluetooth'
-          : connectionMode === 'serial'
+          : connectionMode === 'serial' || connectionMode === 'websocket'
           ? 'serial'
           : 'simulator',
       isSample: false,
@@ -508,14 +614,22 @@ export default function App() {
 
           {/* Zone 3: 1 Primary Action CTA */}
           <div className="flex items-center shrink-0">
-            {connectionMode === 'bluetooth' || connectionMode === 'serial' ? (
+            {connectionMode === 'bluetooth' ||
+            connectionMode === 'serial' ||
+            connectionMode === 'websocket' ? (
               <button
                 type="button"
                 onClick={handleDisconnect}
                 className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap shrink-0 hover:bg-emerald-500/25 transition-colors"
               >
                 <Bluetooth className="w-4 h-4" />
-                <span>{connectionMode === 'serial' ? 'Putuskan USB' : 'Putuskan BLE'}</span>
+                <span>
+                  {connectionMode === 'serial'
+                    ? 'Putuskan USB'
+                    : connectionMode === 'websocket'
+                    ? 'Putuskan Bridge'
+                    : 'Putuskan BLE'}
+                </span>
               </button>
             ) : (
               <button
@@ -608,12 +722,18 @@ export default function App() {
             deviceName={deviceName}
             bleSupported={bleClientRef.current?.isSupported() ?? false}
             serialSupported={serialClientRef.current?.isSupported() ?? false}
+            nativeApkAvailable={nativeClientRef.current?.isAvailable() ?? false}
+            nativePairedDevices={nativeClientRef.current?.listPairedDevices() ?? []}
             bleError={bleError}
             bleConfig={bleConfig}
             thresholds={thresholds}
             rawLogs={rawLogs}
+            parsedFrameCount={history.length}
             onConnectBluetooth={handleConnectBluetooth}
+            onConnectNativeClassic={handleConnectNativeClassic}
             onConnectSerial={handleConnectSerial}
+            onConnectWebSocket={handleConnectWebSocket}
+            onSendTestCommand={handleSendTestCommand}
             onDisconnect={handleDisconnect}
             onStartSimulator={handleStartSimulator}
             onUpdateBleConfig={setBleConfig}

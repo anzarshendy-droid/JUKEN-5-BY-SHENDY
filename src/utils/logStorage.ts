@@ -1,4 +1,5 @@
 import { LogSession, TelemetryFrame } from '../types/telemetry';
+import { createInitialFrame, hexToBytes, parseJukenPacket } from './jukenProtocol';
 
 const DB_NAME = 'juken5_telemetry_db';
 const DB_VERSION = 1;
@@ -254,7 +255,7 @@ export function triggerFileDownload(filename: string, content: string, mimeType:
 
 export function parseImportedLog(filename: string, text: string): LogSession {
   const trimmed = text.trim();
-  const baseName = filename.replace(/\.(csv|json)$/i, '');
+  const baseName = filename.replace(/\.(csv|json|txt|log)$/i, '');
 
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     const parsed = JSON.parse(trimmed);
@@ -272,10 +273,47 @@ export function parseImportedLog(filename: string, text: string): LogSession {
   const lines = trimmed.split(/[\r\n]+/).filter((l) => l.trim().length > 0);
   const frames: TelemetryFrame[] = [];
   const baseTs = Date.now();
+  let prevFrame = createInitialFrame();
 
   for (let idx = 0; idx < lines.length; idx++) {
-    const cols = lines[idx].split(',').map((c) => c.trim());
-    // Skip header row
+    const rawLine = lines[idx].trim();
+    // Strip common Android Serial Bluetooth Terminal prefixes like "12:04:15.230 " or "[RX] "
+    const cleanedLine = rawLine
+      .replace(/^\d{1,2}:\d{2}:\d{2}(?:[.,]\d{1,3})?\s*/i, '')
+      .replace(/^\[?(?:RX|TX|IN|OUT)\]?[:>\s-]*/i, '')
+      .trim();
+
+    if (!cleanedLine) continue;
+
+    // 1. Detect HEX packet string from HC-05 terminal (e.g. "AA 55 21 34 ...")
+    const hexCandidate = cleanedLine.replace(/\s+/g, '');
+    if (/^(?:[0-9a-fA-F]{2}){12,}$/.test(hexCandidate)) {
+      const hexBytes = hexToBytes(hexCandidate);
+      const parsedHex = parseJukenPacket(hexBytes, 'juken_binary', baseTs, prevFrame);
+      if (parsedHex) {
+        const elapsedMs = frames.length * 100;
+        const f = { ...parsedHex, elapsedMs, timestamp: baseTs + elapsedMs };
+        prevFrame = f;
+        frames.push(f);
+        continue;
+      }
+    }
+
+    // 2. Try Key-Value ASCII (e.g. "RPM:8500 AFR:12.8 TPS:85")
+    if (/RPM[:=]/i.test(cleanedLine)) {
+      const asciiBytes = new TextEncoder().encode(cleanedLine);
+      const parsedKv = parseJukenPacket(asciiBytes, 'key_value', baseTs, prevFrame);
+      if (parsedKv) {
+        const elapsedMs = frames.length * 100;
+        const f = { ...parsedKv, elapsedMs, timestamp: baseTs + elapsedMs };
+        prevFrame = f;
+        frames.push(f);
+        continue;
+      }
+    }
+
+    const cols = cleanedLine.split(',').map((c) => c.trim());
+    // Skip CSV header row
     if (idx === 0 && Number.isNaN(parseFloat(cols[0])) && Number.isNaN(parseFloat(cols[2] || ''))) {
       continue;
     }
@@ -284,7 +322,7 @@ export function parseImportedLog(filename: string, text: string): LogSession {
     const isFullFormat = cols.length >= 10 && Number.isNaN(Date.parse(cols[1])) === false;
     if (isFullFormat) {
       const elapsedMs = parseFloat(cols[0]) || frames.length * 100;
-      frames.push({
+      const f: TelemetryFrame = {
         elapsedMs,
         timestamp: Date.parse(cols[1]) || baseTs + elapsedMs,
         rpm: parseFloat(cols[2]) || 0,
@@ -297,12 +335,14 @@ export function parseImportedLog(filename: string, text: string): LogSession {
         ignTiming: parseFloat(cols[9]) || 15,
         injWidth: parseFloat(cols[10]) || 2.0,
         speed: parseFloat(cols[11]) || 0,
-      });
+      };
+      prevFrame = f;
+      frames.push(f);
     } else {
       const nums = cols.map((c) => parseFloat(c));
       if (!Number.isNaN(nums[0]) && !Number.isNaN(nums[1])) {
         const elapsedMs = frames.length * 100;
-        frames.push({
+        const f: TelemetryFrame = {
           elapsedMs,
           timestamp: baseTs + elapsedMs,
           rpm: nums[0],
@@ -315,13 +355,17 @@ export function parseImportedLog(filename: string, text: string): LogSession {
           ignTiming: nums[7] ?? 15,
           injWidth: nums[8] ?? 2.2,
           speed: nums[9] ?? 0,
-        });
+        };
+        prevFrame = f;
+        frames.push(f);
       }
     }
   }
 
   if (frames.length === 0) {
-    throw new Error('Format file log tidak dikenali atau data kosong.');
+    throw new Error(
+      'Format log tidak dikenali atau data kosong. Gunakan file/teks CSV, JSON, Key-Value (RPM:8500 AFR:12.8), atau HEX frame (AA 55 ...).'
+    );
   }
 
   const durationMs = frames[frames.length - 1].elapsedMs - frames[0].elapsedMs;

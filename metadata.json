@@ -1,6 +1,6 @@
 {
   "name": "Juken 5+ Telemetry",
   "description": "Aplikasi dasbor telemetri real-time dan data logger untuk ECU BRT Juken 5+ via Bluetooth dengan kustomisasi widget dan grafik analisis performa mesin interaktif.",
-  "requestFramePermissions": ["bluetooth"],
+  "requestFramePermissions": ["bluetooth", "geolocation"],
   "majorCapabilities": []
 }

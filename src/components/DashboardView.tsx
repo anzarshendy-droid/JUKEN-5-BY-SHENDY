@@ -216,6 +216,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 ? `BLE: ${deviceName || 'Juken 5+'}`
                 : connectionMode === 'serial'
                 ? 'USB Serial'
+                : connectionMode === 'websocket'
+                ? 'Live Bridge (WS)'
                 : connectionMode === 'simulator'
                 ? 'Simulasi ECU'
                 : 'Terputus'}

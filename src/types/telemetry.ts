@@ -175,10 +175,12 @@ export interface AlertThresholds {
   batteryLowWarning: number;
 }
 
-export type ConnectionMode = 'disconnected' | 'bluetooth' | 'serial' | 'simulator';
+export type ConnectionMode = 'disconnected' | 'bluetooth' | 'serial' | 'websocket' | 'simulator';
 export type SimulatorScenario = 'dyno' | 'touring' | 'idle' | 'manual';
 
 export type PacketProtocol = 'auto' | 'juken_binary' | 'csv' | 'key_value';
+
+export type BleScanMode = 'smart' | 'custom' | 'all';
 
 export interface BluetoothConfig {
   serviceUuid: string;
@@ -188,6 +190,9 @@ export interface BluetoothConfig {
   pollCommandHex: string;
   pollIntervalMs: number;
   serialBaudRate?: number;
+  scanMode?: BleScanMode;
+  customNamePrefix?: string;
+  wsBridgeUrl?: string;
 }
 
 export interface RawPacketLog {
@@ -234,5 +239,8 @@ export interface DragRunRecord {
   peakSpeedKmh: number;
   peakRpm: number;
   gpsAccuracyM: number | null;
+  peakLaunchG?: number | null;
+  maxPitchDeg?: number | null;
+  maxOzDriftDeg?: number | null;
 }
 

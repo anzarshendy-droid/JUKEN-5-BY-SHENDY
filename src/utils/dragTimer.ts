@@ -127,6 +127,9 @@ export function exportDragRunsToCsv(runs: DragRunRecord[]): string {
     'Peak_Speed_kmh',
     'Peak_RPM',
     'GPS_Accuracy_m',
+    'Peak_G',
+    'Max_Pitch_deg',
+    'Max_Oz_Drift_deg',
   ];
   const rows = runs.map((r) => [
     r.id,
@@ -148,6 +151,9 @@ export function exportDragRunsToCsv(runs: DragRunRecord[]): string {
     r.peakSpeedKmh.toFixed(1),
     r.peakRpm,
     r.gpsAccuracyM !== null ? r.gpsAccuracyM.toFixed(1) : '-',
+    r.peakLaunchG !== undefined && r.peakLaunchG !== null ? r.peakLaunchG.toFixed(2) : '-',
+    r.maxPitchDeg !== undefined && r.maxPitchDeg !== null ? r.maxPitchDeg.toFixed(1) : '-',
+    r.maxOzDriftDeg !== undefined && r.maxOzDriftDeg !== null ? r.maxOzDriftDeg.toFixed(1) : '-',
   ]);
   return [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
 }
